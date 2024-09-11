@@ -1,0 +1,9 @@
+site/
+target/
+interval_analysis/target/
+parser/target/
+program_structure/target/
+.idea/
+.vscode/
+.DS_Store
+*.circom

@@ -1,0 +1,4 @@
+[workspace]
+members = [ "interval_analysis","intsafe","parser","program_structure"]
+
+resolver = "2"
