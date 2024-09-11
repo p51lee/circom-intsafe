@@ -1,0 +1,12 @@
+[package]
+name = "circom-intsafe"
+version = "0.1.0"
+edition = "2021"
+authors = ["Kanguk Lee <p51lee@kaist.ac.kr>"]
+description = "TODO"
+license = "GPL-3.0"
+repository = "https://github.com/p51lee/circom-intsafe"
+
+[dependencies]
+parser = {path = "../parser"}
+program_structure = {path = "../program_structure"}
