@@ -1,0 +1,10 @@
+[package]
+name = "interval_analysis"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+parser = {path = "../parser"}
+program_structure = {path = "../program_structure"}
+num-bigint-dig = "0.6.0"
+
