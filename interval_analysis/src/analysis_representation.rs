@@ -1,3 +1,5 @@
+use core::panic;
+
 use num_bigint::BigInt;
 use program_structure::abstract_syntax_tree::ast::*;
 
@@ -43,8 +45,14 @@ pub enum ALExpr {
     ALBop {
         meta: ALMeta,
         op: ALBopCode,
-        lhs: Box<ALExpr>,
-        rhs: Box<ALExpr>,
+        lhe: Box<ALExpr>,
+        rhe: Box<ALExpr>,
+    },
+    ALCmp {
+        meta: ALMeta,
+        op: ALBopCode,
+        lhe: Box<ALExpr>,
+        rhe: Box<ALExpr>,
     },
     ALUop {
         meta: ALMeta,
@@ -60,6 +68,44 @@ pub enum ALExpr {
         meta: ALMeta,
         value: BigInt,
     },
+    ALArrayInLine {
+        meta: ALMeta,
+        values: Vec<ALExpr>,
+    },
+}
+
+impl ALExpr {
+    pub fn from_expr(expr: &Expression) -> ALExpr {
+        use Expression::*;
+        match expr {
+            InfixOp {
+                meta,
+                lhe,
+                infix_op,
+                rhe,
+            } => todo!(),
+            PrefixOp {
+                meta,
+                prefix_op,
+                rhe,
+            } => todo!(),
+            InlineSwitchOp {
+                meta,
+                cond,
+                if_true,
+                if_false,
+            } => todo!(),
+            Variable { meta, name, access } => todo!(),
+            Number(meta, value) => todo!(),
+            ArrayInLine { meta, values } => todo!(),
+            ParallelOp { .. } => panic!("ParallelOp not supported yet"),
+            Call { .. } => panic!("Call not supported yet"),
+            AnonymousComp { .. } => panic!("AnonymousComp not supported yet"),
+            Tuple { .. } => panic!("Tuple not supported yet"),
+            UniformArray { .. } => panic!("UniformArray not supported yet"),
+        }
+        todo!()
+    }
 }
 
 pub enum ALBopCode {
@@ -71,6 +117,9 @@ pub enum ALBopCode {
     ALXor,
     ALShl,
     ALShr,
+}
+
+pub enum ALCmpCode {
     ALLe,
     ALGe,
     ALLt,

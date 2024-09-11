@@ -108,11 +108,15 @@ impl Report {
         let mut secondary = self.get_secondary().clone();
         labels.append(&mut secondary);
 
-        if self.is_warning() { Diagnostic::warning() } else { Diagnostic::error() }
-            .with_message(self.get_message())
-            .with_code(Report::error_code_to_diagnostic_code(self.get_code()))
-            .with_labels(labels)
-            .with_notes(self.get_notes().clone())
+        if self.is_warning() {
+            Diagnostic::warning()
+        } else {
+            Diagnostic::error()
+        }
+        .with_message(self.get_message())
+        .with_code(Report::error_code_to_diagnostic_code(self.get_code()))
+        .with_labels(labels)
+        .with_notes(self.get_notes().clone())
     }
 
     pub fn is_error(&self) -> bool {

@@ -182,7 +182,11 @@ impl<C: Clone> MemorySlice<C> {
             offset += 1;
         }
 
-        Result::Ok(MemorySlice { route: size, values, number_inserts: 0 })
+        Result::Ok(MemorySlice {
+            route: size,
+            values,
+            number_inserts: 0,
+        })
     }
 
     // User operations
@@ -190,7 +194,11 @@ impl<C: Clone> MemorySlice<C> {
         MemorySlice::new_with_route(&[], initial_value)
     }
     pub fn new_array(route: Vec<SliceCapacity>, values: Vec<C>) -> MemorySlice<C> {
-        MemorySlice { route, values, number_inserts: 0 }
+        MemorySlice {
+            route,
+            values,
+            number_inserts: 0,
+        }
     }
     pub fn new_with_route(route: &[SliceCapacity], initial_value: &C) -> MemorySlice<C> {
         let mut length = 1;
@@ -203,7 +211,11 @@ impl<C: Clone> MemorySlice<C> {
             values.push(initial_value.clone());
         }
 
-        MemorySlice { route: route.to_vec(), values, number_inserts: 0 }
+        MemorySlice {
+            route: route.to_vec(),
+            values,
+            number_inserts: 0,
+        }
     }
     pub fn insert_values(
         memory_slice: &mut MemorySlice<C>,
@@ -292,9 +304,7 @@ impl<C: Clone> MemorySlice<C> {
         return Result::Ok(memory_slice.values[index].clone());
     }
 
-    pub fn get_reference_values<'a>(
-        memory_slice: &'a MemorySlice<C>,
-    )-> &'a Vec<C>{
+    pub fn get_reference_values<'a>(memory_slice: &'a MemorySlice<C>) -> &'a Vec<C> {
         &memory_slice.values
     }
 
