@@ -7,6 +7,15 @@ pub struct ALMeta {
     pub start: usize,
     pub end: usize,
 }
+
+impl ALMeta {
+    pub fn from_meta(meta: &Meta) -> ALMeta {
+        ALMeta {
+            start: meta.start,
+            end: meta.end,
+        }
+    }
+}
 pub enum ALStmt {
     ALIfThenElse {
         meta: ALMeta,
@@ -50,7 +59,7 @@ pub enum ALExpr {
     },
     ALCmp {
         meta: ALMeta,
-        op: ALBopCode,
+        op: ALCmpCode,
         lhe: Box<ALExpr>,
         rhe: Box<ALExpr>,
     },
@@ -83,28 +92,103 @@ impl ALExpr {
                 lhe,
                 infix_op,
                 rhe,
-            } => todo!(),
+            } => {
+                let new_meta = ALMeta::from_meta(meta);
+                use ExpressionInfixOpcode::*;
+                match infix_op {
+                    Mul | Add | Sub | ShiftL | ShiftR | BoolAnd | BoolOr => {
+                        let op = match infix_op {
+                            Mul => ALBopCode::ALMul,
+                            Add => ALBopCode::ALAdd,
+                            Sub => ALBopCode::ALSub,
+                            ShiftL => ALBopCode::ALShl,
+                            ShiftR => ALBopCode::ALShr,
+                            BoolAnd => ALBopCode::ALAnd,
+                            BoolOr => ALBopCode::ALOr,
+                            _ => panic!("Unreachable"),
+                        };
+                        ALExpr::ALBop {
+                            meta: new_meta,
+                            op,
+                            lhe: Box::new(ALExpr::from_expr(&*lhe)),
+                            rhe: Box::new(ALExpr::from_expr(&*rhe)),
+                        }
+                    }
+                    LesserEq | GreaterEq | Lesser | Greater | Eq | NotEq => {
+                        let op = match infix_op {
+                            LesserEq => ALCmpCode::ALLe,
+                            GreaterEq => ALCmpCode::ALGe,
+                            Lesser => ALCmpCode::ALLt,
+                            Greater => ALCmpCode::ALGt,
+                            Eq => ALCmpCode::ALEq,
+                            NotEq => ALCmpCode::ALNe,
+                            _ => panic!("Unreachable"),
+                        };
+                        ALExpr::ALCmp {
+                            meta: new_meta,
+                            op,
+                            lhe: Box::new(ALExpr::from_expr(&*lhe)),
+                            rhe: Box::new(ALExpr::from_expr(&*rhe)),
+                        }
+                    }
+                    Div => panic!("Div not supported yet"),
+                    Pow => panic!("Pow not supported yet"),
+                    IntDiv => panic!("IntDiv not supported yet"),
+                    Mod => panic!("Mod not supported yet"),
+                    BitOr | BitAnd | BitXor => panic!("Bitwise operations not supported yet"),
+                }
+            }
             PrefixOp {
                 meta,
                 prefix_op,
                 rhe,
-            } => todo!(),
-            InlineSwitchOp {
-                meta,
-                cond,
-                if_true,
-                if_false,
-            } => todo!(),
-            Variable { meta, name, access } => todo!(),
-            Number(meta, value) => todo!(),
-            ArrayInLine { meta, values } => todo!(),
+            } => {
+                let new_meta = ALMeta::from_meta(meta);
+                use ExpressionPrefixOpcode::*;
+                match prefix_op {
+                    Sub | BoolNot => {
+                        let op = match prefix_op {
+                            Sub => ALUopCode::ALNeg,
+                            BoolNot => ALUopCode::ALBoolNot,
+                            _ => panic!("Unreachable"),
+                        };
+                        ALExpr::ALUop {
+                            meta: new_meta,
+                            op,
+                            arg: Box::new(ALExpr::from_expr(&*rhe)),
+                        }
+                    }
+                    Complement => panic!("Complement operations not supported yet"),
+                }
+            }
+            Variable { meta, name, access } => ALExpr::ALVariable {
+                meta: ALMeta::from_meta(meta),
+                name: name.clone(),
+                access: access
+                    .iter()
+                    .map(|access| match access {
+                        Access::ComponentAccess(_) => {
+                            panic!("ComponentAccess should be inlined")
+                        }
+                        Access::ArrayAccess(e) => ALExpr::from_expr(e),
+                    })
+                    .collect(),
+            },
+            Number(meta, value) => ALExpr::ALNumber {
+                meta: ALMeta::from_meta(meta),
+                value: value.clone(),
+            },
+            ArrayInLine { meta, values } => ALExpr::ALArrayInLine {
+                meta: ALMeta::from_meta(meta),
+                values: values.iter().map(|e| ALExpr::from_expr(e)).collect(),
+            },
+            InlineSwitchOp { .. } => panic!("InlineSwitchOp not supported yet"),
             ParallelOp { .. } => panic!("ParallelOp not supported yet"),
             Call { .. } => panic!("Call not supported yet"),
             AnonymousComp { .. } => panic!("AnonymousComp not supported yet"),
             Tuple { .. } => panic!("Tuple not supported yet"),
             UniformArray { .. } => panic!("UniformArray not supported yet"),
         }
-        todo!()
     }
 }
 
@@ -114,7 +198,6 @@ pub enum ALBopCode {
     ALSub,
     ALAnd,
     ALOr,
-    ALXor,
     ALShl,
     ALShr,
 }
