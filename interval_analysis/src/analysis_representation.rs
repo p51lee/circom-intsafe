@@ -17,15 +17,22 @@ impl ALMeta {
     }
 }
 pub enum ALStmt {
+    ALEmpty {
+        meta: ALMeta,
+    },
+    ALBlock {
+        meta: ALMeta,
+        stmts: Vec<ALStmt>,
+    },
     ALIfThenElse {
         meta: ALMeta,
-        condition: ALExpr,
+        cond: ALExpr,
         if_case: Box<ALStmt>,
         else_case: Option<Box<ALStmt>>,
     },
     ALWhile {
         meta: ALMeta,
-        condition: ALExpr,
+        cond: ALExpr,
         stmt: Box<ALStmt>,
     },
     ALReturn {
@@ -46,7 +53,76 @@ pub enum ALStmt {
 
 impl ALStmt {
     pub fn from_stmt(stmt: &Statement) -> ALStmt {
-        todo!()
+        use Statement::*;
+        match stmt {
+            IfThenElse {
+                meta,
+                cond,
+                if_case,
+                else_case,
+            } => ALStmt::ALIfThenElse {
+                meta: ALMeta::from_meta(meta),
+                cond: ALExpr::from_expr(cond),
+                if_case: Box::new(ALStmt::from_stmt(&*if_case)),
+                else_case: match else_case {
+                    Some(else_case) => Some(Box::new(ALStmt::from_stmt(&*else_case))),
+                    None => None,
+                },
+            },
+            While { meta, cond, stmt } => ALStmt::ALWhile {
+                meta: ALMeta::from_meta(meta),
+                cond: ALExpr::from_expr(cond),
+                stmt: Box::new(ALStmt::from_stmt(&*stmt)),
+            },
+            Return { meta, value } => ALStmt::ALReturn {
+                meta: ALMeta::from_meta(meta),
+                value: ALExpr::from_expr(value),
+            },
+            InitializationBlock {
+                meta,
+                initializations,
+                ..
+            } => ALStmt::ALBlock {
+                meta: ALMeta::from_meta(meta),
+                stmts: initializations
+                    .iter()
+                    .map(|stmt| ALStmt::from_stmt(stmt))
+                    .collect(),
+            },
+            Declaration { meta, .. } => ALStmt::ALEmpty {
+                meta: ALMeta::from_meta(meta),
+            },
+            Substitution {
+                meta,
+                var,
+                access,
+                op,
+                rhe,
+            } => ALStmt::ALAssign {
+                meta: ALMeta::from_meta(meta),
+                var: var.clone(),
+                access: ALExpr::from_access(access),
+                value: ALExpr::from_expr(rhe),
+            },
+            MultSubstitution { .. } => panic!("MultSubstitution not supported yet"),
+            UnderscoreSubstitution { meta, .. } => ALStmt::ALEmpty {
+                meta: ALMeta::from_meta(meta),
+            },
+            ConstraintEquality { meta, .. } => ALStmt::ALEmpty {
+                meta: ALMeta::from_meta(meta),
+            },
+            LogCall { meta, .. } => ALStmt::ALEmpty {
+                meta: ALMeta::from_meta(meta),
+            },
+            Block { meta, stmts } => ALStmt::ALBlock {
+                meta: ALMeta::from_meta(meta),
+                stmts: stmts.iter().map(|stmt| ALStmt::from_stmt(stmt)).collect(),
+            },
+            Assert { meta, arg } => ALStmt::ALAssert {
+                meta: ALMeta::from_meta(meta),
+                arg: ALExpr::from_expr(arg),
+            },
+        }
     }
 }
 
@@ -164,15 +240,7 @@ impl ALExpr {
             Variable { meta, name, access } => ALExpr::ALVariable {
                 meta: ALMeta::from_meta(meta),
                 name: name.clone(),
-                access: access
-                    .iter()
-                    .map(|access| match access {
-                        Access::ComponentAccess(_) => {
-                            panic!("ComponentAccess should be inlined")
-                        }
-                        Access::ArrayAccess(e) => ALExpr::from_expr(e),
-                    })
-                    .collect(),
+                access: ALExpr::from_access(access),
             },
             Number(meta, value) => ALExpr::ALNumber {
                 meta: ALMeta::from_meta(meta),
@@ -189,6 +257,15 @@ impl ALExpr {
             Tuple { .. } => panic!("Tuple not supported yet"),
             UniformArray { .. } => panic!("UniformArray not supported yet"),
         }
+    }
+    fn from_access(accesses: &Vec<Access>) -> Vec<ALExpr> {
+        accesses
+            .iter()
+            .map(|access| match access {
+                Access::ComponentAccess(_) => panic!("ComponentAccess should be inlined"),
+                Access::ArrayAccess(e) => ALExpr::from_expr(e),
+            })
+            .collect()
     }
 }
 
