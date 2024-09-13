@@ -1,22 +1,32 @@
 use crate::analysis_representation::ALCmpCode;
 use num_bigint::BigInt;
-use program_structure::abstract_syntax_tree::*;
 use std::cmp::{max, min, Ord, PartialOrd};
+use std::collections::{HashMap, HashSet};
 use std::ops::{Add, BitAndAssign, BitOr, BitOrAssign, Mul, Sub};
 
-pub trait CPO: PartialOrd {
+pub trait CPO: PartialOrd + Sized {
     type T;
+
     fn bottom() -> Self::T;
     fn join(lhs: &Self::T, rhs: &Self::T) -> Self::T;
     fn widen(lhs: &Self::T, rhs: &Self::T) -> Self::T;
     fn narrow(lhs: &Self::T, rhs: &Self::T) -> Self::T;
 }
 
-pub trait NumericalDomain: CPO + Sized + Add + Sub + Mul {
+pub trait NumericalDomain: CPO {
     fn top() -> Self::T;
     fn of_int(i: i32) -> Self::T;
     fn cmp(pred: ALCmpCode, lhs: &Self::T, rhs: &Self::T) -> Self::T;
     fn filter(pred: ALCmpCode, lhs: &Self::T, rhs: &Self::T) -> Self::T;
+    fn add(lhs: &Self::T, rhs: &Self::T) -> Self::T;
+    fn sub(lhs: &Self::T, rhs: &Self::T) -> Self::T;
+    fn mul(lhs: &Self::T, rhs: &Self::T) -> Self::T;
+}
+
+pub trait Memory: CPO {
+    type K;
+    type V: NumericalDomain;
+    fn find(&self, key: &Self::K) -> Self::V;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -220,10 +230,10 @@ impl CPO for Interval {
 }
 
 /** For concise joining */
-impl BitOr for Interval {
+impl BitOr for &Interval {
     type Output = Interval;
     fn bitor(self, rhs: Self) -> Self::Output {
-        Interval::join(&self, &rhs)
+        Interval::join(self, rhs)
     }
 }
 
@@ -238,49 +248,6 @@ impl BitOrAssign for Interval {
 impl BitAndAssign for Interval {
     fn bitand_assign(&mut self, rhs: Self) {
         *self = Interval::narrow(self, &rhs);
-    }
-}
-
-impl Add for Interval {
-    type Output = Interval;
-    fn add(self, rhs: Self) -> Self::Output {
-        match (self, rhs) {
-            (Interval::Bot, _) | (_, Interval::Bot) => Interval::Bot,
-            (Interval::Interval(l1, l2), Interval::Interval(r1, r2)) => {
-                Interval::Interval(l1.clone() + r1.clone(), l2.clone() + r2.clone())
-            }
-        }
-    }
-}
-
-impl Sub for Interval {
-    type Output = Interval;
-    fn sub(self, rhs: Self) -> Self::Output {
-        match (self, rhs) {
-            (Interval::Bot, _) | (_, Interval::Bot) => Interval::Bot,
-            (Interval::Interval(l1, l2), Interval::Interval(r1, r2)) => {
-                Interval::Interval(l1.clone() - r2.clone(), l2.clone() - r1.clone())
-            }
-        }
-    }
-}
-
-impl Mul for Interval {
-    type Output = Interval;
-    fn mul(self, rhs: Self) -> Self::Output {
-        match (self, rhs) {
-            (Interval::Bot, _) | (_, Interval::Bot) => Interval::Bot,
-            (Interval::Interval(l1, l2), Interval::Interval(r1, r2)) => {
-                let mut v = vec![
-                    l1.clone() * r1.clone(),
-                    l1.clone() * r2.clone(),
-                    l2.clone() * r1.clone(),
-                    l2.clone() * r2.clone(),
-                ];
-                v.sort();
-                Interval::Interval(v[0].clone(), v[3].clone())
-            }
-        }
     }
 }
 
@@ -394,5 +361,153 @@ impl NumericalDomain for Interval {
     }
     fn of_int(i: i32) -> Self::T {
         Interval::of_ints(i, i)
+    }
+    fn add(lhs: &Self::T, rhs: &Self::T) -> Self::T {
+        match (lhs, rhs) {
+            (Interval::Bot, _) | (_, Interval::Bot) => Interval::Bot,
+            (Interval::Interval(l1, l2), Interval::Interval(r1, r2)) => {
+                Interval::Interval(l1.clone() + r1.clone(), l2.clone() + r2.clone())
+            }
+        }
+    }
+    fn sub(lhs: &Self::T, rhs: &Self::T) -> Self::T {
+        match (lhs, rhs) {
+            (Interval::Bot, _) | (_, Interval::Bot) => Interval::Bot,
+            (Interval::Interval(l1, l2), Interval::Interval(r1, r2)) => {
+                Interval::Interval(l1.clone() - r2.clone(), l2.clone() - r1.clone())
+            }
+        }
+    }
+    fn mul(lhs: &Self::T, rhs: &Self::T) -> Self::T {
+        match (lhs, rhs) {
+            (Interval::Bot, _) | (_, Interval::Bot) => Interval::Bot,
+            (Interval::Interval(l1, l2), Interval::Interval(r1, r2)) => {
+                let mut v = vec![
+                    l1.clone() * r1.clone(),
+                    l1.clone() * r2.clone(),
+                    l2.clone() * r1.clone(),
+                    l2.clone() * r2.clone(),
+                ];
+                v.sort();
+                Interval::Interval(v[0].clone(), v[3].clone())
+            }
+        }
+    }
+}
+
+impl Add for &Interval {
+    type Output = Interval;
+    fn add(self, rhs: Self) -> Self::Output {
+        Interval::add(self, rhs)
+    }
+}
+
+impl Sub for &Interval {
+    type Output = Interval;
+    fn sub(self, rhs: Self) -> Self::Output {
+        Interval::sub(self, rhs)
+    }
+}
+
+impl Mul for &Interval {
+    type Output = Interval;
+    fn mul(self, rhs: Self) -> Self::Output {
+        Interval::mul(self, rhs)
+    }
+}
+
+// TODO: Implement more effective abstraction for arrays: segment-based analysis
+
+#[derive(Debug, Clone, PartialEq)]
+struct IntervalMemory {
+    memory: HashMap<String, Interval>,
+}
+impl IntervalMemory {
+    fn from_hashmap(memory: HashMap<String, Interval>) -> IntervalMemory {
+        IntervalMemory { memory }
+    }
+    fn union_keys(&self, other: &Self) -> HashSet<String> {
+        let mut union_keys = HashSet::new();
+        for key in self.memory.keys() {
+            union_keys.insert(key.clone());
+        }
+        for key in other.memory.keys() {
+            union_keys.insert(key.clone());
+        }
+        union_keys
+    }
+    fn merge(
+        lhs: &IntervalMemory,
+        rhs: &IntervalMemory,
+        f: fn(&Interval, &Interval) -> Interval,
+    ) -> IntervalMemory {
+        let mut new_memory = HashMap::new();
+        for key in IntervalMemory::union_keys(lhs, rhs) {
+            let lhs_value = lhs.memory.get(&key).unwrap_or(&Interval::Bot);
+            let rhs_value = rhs.memory.get(&key).unwrap_or(&Interval::Bot);
+            new_memory.insert(key, f(lhs_value, rhs_value));
+        }
+        IntervalMemory::from_hashmap(new_memory)
+    }
+}
+
+impl PartialOrd for IntervalMemory {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        let mut result = std::cmp::Ordering::Equal;
+        for key in IntervalMemory::union_keys(self, other) {
+            let lhs_value = self.memory.get(&key).unwrap_or(&Interval::Bot);
+            let rhs_value = other.memory.get(&key).unwrap_or(&Interval::Bot);
+            match lhs_value.partial_cmp(rhs_value) {
+                Some(std::cmp::Ordering::Equal) => {}
+                Some(std::cmp::Ordering::Less) => {
+                    if result == std::cmp::Ordering::Greater {
+                        return None;
+                    }
+                    result = std::cmp::Ordering::Less;
+                }
+                Some(std::cmp::Ordering::Greater) => {
+                    if result == std::cmp::Ordering::Less {
+                        return None;
+                    }
+                    result = std::cmp::Ordering::Greater;
+                }
+                None => return None,
+            }
+        }
+        Some(result)
+    }
+}
+
+impl CPO for IntervalMemory {
+    type T = IntervalMemory;
+    fn bottom() -> Self::T {
+        IntervalMemory {
+            memory: HashMap::new(),
+        }
+    }
+    fn join(lhs: &Self::T, rhs: &Self::T) -> Self::T {
+        let mut new_memory = lhs.memory.clone();
+        for (key, value) in &rhs.memory {
+            if let Some(lhs_value) = lhs.memory.get(key) {
+                new_memory.insert(key.clone(), lhs_value | value);
+            } else {
+                new_memory.insert(key.clone(), value.clone());
+            }
+        }
+        IntervalMemory::from_hashmap(new_memory)
+    }
+    fn widen(lhs: &Self::T, rhs: &Self::T) -> Self::T {
+        IntervalMemory::merge(lhs, rhs, Interval::widen)
+    }
+    fn narrow(lhs: &Self::T, rhs: &Self::T) -> Self::T {
+        IntervalMemory::merge(lhs, rhs, Interval::narrow)
+    }
+}
+
+impl Memory for IntervalMemory {
+    type K = String;
+    type V = Interval;
+    fn find(&self, key: &Self::K) -> Self::V {
+        self.memory.get(key).unwrap_or(&Interval::Bot).clone()
     }
 }

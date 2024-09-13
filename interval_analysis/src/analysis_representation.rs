@@ -42,8 +42,8 @@ pub enum ALStmt {
     ALAssign {
         meta: ALMeta,
         var: String,
-        access: Vec<ALExpr>,
         value: ALExpr,
+        // access: Vec<ALExpr>, TODO: More complex abstraction for array access
     },
     ALAssert {
         meta: ALMeta,
@@ -92,16 +92,9 @@ impl ALStmt {
             Declaration { meta, .. } => ALStmt::ALEmpty {
                 meta: ALMeta::from_meta(meta),
             },
-            Substitution {
-                meta,
-                var,
-                access,
-                op,
-                rhe,
-            } => ALStmt::ALAssign {
+            Substitution { meta, var, rhe, .. } => ALStmt::ALAssign {
                 meta: ALMeta::from_meta(meta),
                 var: var.clone(),
-                access: ALExpr::from_access(access),
                 value: ALExpr::from_expr(rhe),
             },
             MultSubstitution { .. } => panic!("MultSubstitution not supported yet"),
