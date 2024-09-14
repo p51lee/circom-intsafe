@@ -29,6 +29,12 @@ pub trait Memory: CPO {
     fn find(&self, key: &Self::K) -> Self::V;
 }
 
+pub trait Table {
+    type L;
+    type M: Memory;
+    fn find(&self, label: &Self::L) -> Self::M;
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Elt {
     Int(BigInt),
@@ -419,7 +425,7 @@ impl Mul for &Interval {
 // TODO: Implement more effective abstraction for arrays: segment-based analysis
 
 #[derive(Debug, Clone, PartialEq)]
-struct IntervalMemory {
+pub struct IntervalMemory {
     memory: HashMap<String, Interval>,
 }
 impl IntervalMemory {
@@ -510,4 +516,8 @@ impl Memory for IntervalMemory {
     fn find(&self, key: &Self::K) -> Self::V {
         self.memory.get(key).unwrap_or(&Interval::Bot).clone()
     }
+}
+
+pub struct IntervalTable {
+    table: HashMap<String, IntervalMemory>,
 }

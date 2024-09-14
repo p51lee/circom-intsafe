@@ -1,39 +1,58 @@
 use core::panic;
+use std::hash::{Hash, Hasher};
 
 use num_bigint::BigInt;
 use program_structure::abstract_syntax_tree::ast::*;
 
+#[derive(Hash, Clone, Copy)]
 pub struct ALMeta {
     pub start: usize,
     pub end: usize,
+    pub index: usize,
 }
 
 impl ALMeta {
+    pub fn empty() -> ALMeta {
+        ALMeta {
+            start: 0,
+            end: 0,
+            index: 0,
+        }
+    }
     pub fn from_meta(meta: &Meta) -> ALMeta {
         ALMeta {
             start: meta.start,
             end: meta.end,
+            index: meta.elem_id,
         }
     }
 }
+
+#[derive(Clone)]
 pub enum ALStmt {
     ALEmpty {
         meta: ALMeta,
+        next: Option<ALMeta>,
     },
     ALBlock {
         meta: ALMeta,
         stmts: Vec<ALStmt>,
+        next: Option<ALMeta>,
     },
     ALIfThenElse {
         meta: ALMeta,
         cond: ALExpr,
         if_case: Box<ALStmt>,
         else_case: Option<Box<ALStmt>>,
+        next_true: ALMeta,
+        next_false: Option<ALMeta>,
     },
     ALWhile {
         meta: ALMeta,
         cond: ALExpr,
-        stmt: Box<ALStmt>,
+        body: Box<ALStmt>,
+        next_true: ALMeta,
+        next_false: Option<ALMeta>,
     },
     ALReturn {
         meta: ALMeta,
@@ -43,16 +62,97 @@ pub enum ALStmt {
         meta: ALMeta,
         var: String,
         value: ALExpr,
+        next: Option<ALMeta>,
         // access: Vec<ALExpr>, TODO: More complex abstraction for array access
     },
     ALAssert {
         meta: ALMeta,
         arg: ALExpr,
+        next: Option<ALMeta>,
     },
 }
 
 impl ALStmt {
     pub fn from_stmt(stmt: &Statement) -> ALStmt {
+        let mut al_stmt = ALStmt::from_stmt_suppl(stmt);
+        al_stmt.init_next(None);
+        al_stmt
+    }
+    fn meta(&self) -> ALMeta {
+        use ALStmt::*;
+        match self {
+            ALEmpty { meta, .. }
+            | ALBlock { meta, .. }
+            | ALIfThenElse { meta, .. }
+            | ALWhile { meta, .. }
+            | ALReturn { meta, .. }
+            | ALAssign { meta, .. }
+            | ALAssert { meta, .. } => meta.clone(),
+        }
+    }
+    fn first_stmt(&self) -> &ALStmt {
+        use ALStmt::*;
+        match self {
+            ALBlock { stmts, .. } => stmts.first().map_or(self, |stmt| stmt.first_stmt()),
+            _ => self,
+        }
+    }
+
+    fn init_next(&mut self, next: Option<ALMeta>) {
+        let self_meta = self.meta();
+        use ALStmt::*;
+        match self {
+            ALReturn { .. } => {}
+            ALEmpty { next: n, .. } | ALAssign { next: n, .. } | ALAssert { next: n, .. } => {
+                *n = next;
+            }
+            ALBlock { stmts, next: n, .. } => {
+                if stmts.len() == 0 {
+                    *n = next
+                } else {
+                    *n = Some(stmts[0].first_stmt().meta());
+                    for i in 0..stmts.len() {
+                        if i == stmts.len() - 1 {
+                            stmts[i].init_next(next);
+                        } else {
+                            let (left, right) = stmts.split_at_mut(i + 1);
+                            let current_stmt = &mut left[i]; // Mutable reference to the current statement
+                            let next_stmt = &right[0].first_stmt(); // Immutable reference to the next statement
+                            current_stmt.init_next(Some(next_stmt.meta()));
+                        }
+                    }
+                }
+            }
+            ALIfThenElse {
+                if_case,
+                else_case,
+                next_true,
+                next_false,
+                ..
+            } => {
+                if_case.init_next(next);
+                *next_true = if_case.first_stmt().meta();
+                if let Some(else_case) = else_case {
+                    else_case.init_next(next);
+                    *next_false = Some(else_case.first_stmt().meta());
+                } else {
+                    *next_false = next;
+                }
+            }
+            ALWhile {
+                body,
+                next_true,
+                next_false,
+                ..
+            } => {
+                *next_true = body.first_stmt().meta();
+                *next_false = next;
+                body.init_next(Some(self_meta));
+            }
+        }
+    }
+
+    fn from_stmt_suppl(stmt: &Statement) -> ALStmt {
         use Statement::*;
         match stmt {
             IfThenElse {
@@ -60,20 +160,34 @@ impl ALStmt {
                 cond,
                 if_case,
                 else_case,
-            } => ALStmt::ALIfThenElse {
-                meta: ALMeta::from_meta(meta),
-                cond: ALExpr::from_expr(cond),
-                if_case: Box::new(ALStmt::from_stmt(&*if_case)),
-                else_case: match else_case {
-                    Some(else_case) => Some(Box::new(ALStmt::from_stmt(&*else_case))),
-                    None => None,
-                },
-            },
-            While { meta, cond, stmt } => ALStmt::ALWhile {
-                meta: ALMeta::from_meta(meta),
-                cond: ALExpr::from_expr(cond),
-                stmt: Box::new(ALStmt::from_stmt(&*stmt)),
-            },
+            } => {
+                let if_stmt = ALStmt::from_stmt_suppl(&*if_case);
+                let else_stmt = else_case
+                    .as_ref()
+                    .map(|stmt| ALStmt::from_stmt_suppl(&*stmt));
+                ALStmt::ALIfThenElse {
+                    meta: ALMeta::from_meta(meta),
+                    cond: ALExpr::from_expr(cond),
+                    if_case: Box::new(if_stmt),
+                    else_case: else_stmt.map(|stmt| Box::new(stmt)),
+                    next_true: ALMeta::empty(),
+                    next_false: None,
+                }
+            }
+            While {
+                meta,
+                cond,
+                stmt: body,
+            } => {
+                let al_body = ALStmt::from_stmt_suppl(&*body);
+                ALStmt::ALWhile {
+                    meta: ALMeta::from_meta(meta),
+                    cond: ALExpr::from_expr(cond),
+                    body: Box::new(al_body),
+                    next_true: ALMeta::empty(),
+                    next_false: None,
+                }
+            }
             Return { meta, value } => ALStmt::ALReturn {
                 meta: ALMeta::from_meta(meta),
                 value: ALExpr::from_expr(value),
@@ -82,43 +196,89 @@ impl ALStmt {
                 meta,
                 initializations,
                 ..
-            } => ALStmt::ALBlock {
-                meta: ALMeta::from_meta(meta),
-                stmts: initializations
-                    .iter()
-                    .map(|stmt| ALStmt::from_stmt(stmt))
-                    .collect(),
-            },
+            } => {
+                if initializations.len() == 0 {
+                    ALStmt::ALEmpty {
+                        meta: ALMeta::from_meta(meta),
+                        next: None,
+                    }
+                } else {
+                    ALStmt::ALBlock {
+                        meta: ALMeta::from_meta(meta),
+                        stmts: initializations
+                            .iter()
+                            .map(|stmt| ALStmt::from_stmt_suppl(stmt))
+                            .collect(),
+                        next: None,
+                    }
+                }
+            }
             Declaration { meta, .. } => ALStmt::ALEmpty {
                 meta: ALMeta::from_meta(meta),
+                next: None,
             },
             Substitution { meta, var, rhe, .. } => ALStmt::ALAssign {
                 meta: ALMeta::from_meta(meta),
                 var: var.clone(),
                 value: ALExpr::from_expr(rhe),
+                next: None,
             },
             MultSubstitution { .. } => panic!("MultSubstitution not supported yet"),
             UnderscoreSubstitution { meta, .. } => ALStmt::ALEmpty {
                 meta: ALMeta::from_meta(meta),
+                next: None,
             },
             ConstraintEquality { meta, .. } => ALStmt::ALEmpty {
                 meta: ALMeta::from_meta(meta),
+                next: None,
             },
             LogCall { meta, .. } => ALStmt::ALEmpty {
                 meta: ALMeta::from_meta(meta),
+                next: None,
             },
-            Block { meta, stmts } => ALStmt::ALBlock {
-                meta: ALMeta::from_meta(meta),
-                stmts: stmts.iter().map(|stmt| ALStmt::from_stmt(stmt)).collect(),
-            },
+            Block { meta, stmts } => {
+                if stmts.len() == 1 {
+                    ALStmt::from_stmt_suppl(&stmts[0])
+                } else if stmts.len() == 0 {
+                    ALStmt::ALEmpty {
+                        meta: ALMeta::from_meta(meta),
+                        next: None,
+                    }
+                } else {
+                    ALStmt::ALBlock {
+                        meta: ALMeta::from_meta(meta),
+                        stmts: stmts
+                            .iter()
+                            .map(|stmt| ALStmt::from_stmt_suppl(stmt))
+                            .collect(),
+                        next: None,
+                    }
+                }
+            }
             Assert { meta, arg } => ALStmt::ALAssert {
                 meta: ALMeta::from_meta(meta),
                 arg: ALExpr::from_expr(arg),
+                next: None,
             },
         }
     }
 }
 
+impl Hash for ALStmt {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        match self {
+            ALStmt::ALEmpty { meta, .. } => meta.hash(state),
+            ALStmt::ALBlock { meta, .. } => meta.hash(state),
+            ALStmt::ALIfThenElse { meta, .. } => meta.hash(state),
+            ALStmt::ALWhile { meta, .. } => meta.hash(state),
+            ALStmt::ALReturn { meta, .. } => meta.hash(state),
+            ALStmt::ALAssign { meta, .. } => meta.hash(state),
+            ALStmt::ALAssert { meta, .. } => meta.hash(state),
+        }
+    }
+}
+
+#[derive(Clone)]
 pub enum ALExpr {
     ALBop {
         meta: ALMeta,
@@ -262,6 +422,7 @@ impl ALExpr {
     }
 }
 
+#[derive(Clone)]
 pub enum ALBopCode {
     ALMul,
     ALAdd,
@@ -272,6 +433,7 @@ pub enum ALBopCode {
     ALShr,
 }
 
+#[derive(Clone)]
 pub enum ALCmpCode {
     ALLe,
     ALGe,
@@ -281,6 +443,7 @@ pub enum ALCmpCode {
     ALNe,
 }
 
+#[derive(Clone)]
 pub enum ALUopCode {
     ALNeg,
     ALBoolNot,

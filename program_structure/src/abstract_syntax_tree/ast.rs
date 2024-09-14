@@ -24,7 +24,7 @@ pub fn build_main_component(public: Vec<String>, call: Expression) -> MainCompon
 
 pub type Version = (usize, usize, usize);
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Meta {
     pub elem_id: usize,
     pub start: usize,
@@ -35,11 +35,11 @@ pub struct Meta {
     type_knowledge: TypeKnowledge,
     memory_knowledge: MemoryKnowledge,
 }
-impl std::fmt::Debug for Meta {
-    fn fmt(&self, _f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        Ok(())
-    }
-}
+// impl std::fmt::Debug for Meta {
+//     fn fmt(&self, _f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+//         Ok(())
+//     }
+// }
 impl Meta {
     pub fn new(start: usize, end: usize) -> Meta {
         Meta {
