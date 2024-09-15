@@ -28,7 +28,14 @@ impl ALMeta {
     }
 }
 
+impl std::fmt::Debug for ALMeta {
+    fn fmt(&self, _f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        Ok(())
+    }
+}
+
 #[derive(Clone)]
+// #[derive(Clone, Debug)]
 pub enum ALStmt {
     ALEmpty {
         meta: ALMeta,
@@ -75,6 +82,7 @@ pub enum ALStmt {
 impl ALStmt {
     pub fn from_stmt(stmt: &Statement) -> ALStmt {
         let mut al_stmt = ALStmt::from_stmt_suppl(stmt);
+        al_stmt.reorder();
         al_stmt.init_next(None);
         al_stmt
     }
@@ -149,6 +157,47 @@ impl ALStmt {
                 *next_false = next;
                 body.init_next(Some(self_meta));
             }
+        }
+    }
+
+    fn reorder(&mut self) {
+        use ALStmt::*;
+        match self {
+            ALBlock { stmts, .. } => {
+                let mut new_stmts = Vec::new();
+                for stmt in stmts.iter_mut() {
+                    stmt.reorder();
+                    match stmt {
+                        ALEmpty { .. } => {}
+                        ALBlock {
+                            stmts: child_stmt, ..
+                        } => new_stmts.append(child_stmt),
+                        _ => new_stmts.push(stmt.clone()),
+                    }
+                }
+                if new_stmts.len() == 0 {
+                    *self = ALEmpty {
+                        meta: self.meta(),
+                        next: None,
+                    };
+                } else if new_stmts.len() == 1 {
+                    *self = new_stmts[0].clone();
+                } else {
+                    *stmts = new_stmts;
+                }
+            }
+            ALIfThenElse {
+                if_case, else_case, ..
+            } => {
+                if_case.reorder();
+                if let Some(else_case) = else_case {
+                    else_case.reorder();
+                }
+            }
+            ALWhile { body, .. } => {
+                body.reorder();
+            }
+            _ => {}
         }
     }
 
@@ -264,6 +313,70 @@ impl ALStmt {
     }
 }
 
+impl ALStmt {
+    // Helper function to format the statement with depth tracking
+    fn fmt_with_depth(&self, f: &mut std::fmt::Formatter<'_>, depth: usize) -> std::fmt::Result {
+        use ALStmt::*;
+
+        let indent = "\t".repeat(depth); // Create an indentation string based on the current depth
+
+        match self {
+            ALEmpty { meta, .. } => write!(f, "{}Empty: {:?}", indent, meta),
+            ALBlock { meta, stmts, .. } => {
+                write!(f, "{}Block: {:?}", indent, meta)?;
+                for stmt in stmts.iter() {
+                    writeln!(f)?; // Newline for each statement
+                    stmt.fmt_with_depth(f, depth + 1)?; // Increase the depth for nested statements
+                }
+                Ok(())
+            }
+            ALIfThenElse {
+                meta,
+                cond,
+                if_case,
+                else_case,
+                ..
+            } => {
+                write!(f, "{}IfThenElse: {:?}", indent, meta)?;
+                writeln!(f, "\n{}Cond: {:?}", indent, cond)?;
+                writeln!(f, "{}If:", indent)?;
+                if_case.fmt_with_depth(f, depth + 1)?;
+                if let Some(else_case) = else_case {
+                    writeln!(f, "\n{}Else:", indent)?;
+                    else_case.fmt_with_depth(f, depth + 1)?;
+                }
+                Ok(())
+            }
+            ALWhile {
+                meta, cond, body, ..
+            } => {
+                write!(f, "{}While: {:?}", indent, meta)?;
+                writeln!(f, "\n{}Cond: {:?}", indent, cond)?;
+                writeln!(f, "{}Body:", indent)?;
+                body.fmt_with_depth(f, depth + 1)
+            }
+            ALReturn { meta, value } => {
+                write!(f, "{}Return: {:?} {:?}", indent, meta, value)
+            }
+            ALAssign {
+                meta, var, value, ..
+            } => {
+                write!(f, "{}Assign: {:?} {} = {:?}", indent, meta, var, value)
+            }
+            ALAssert { meta, arg, .. } => {
+                write!(f, "{}Assert: {:?} {:?}", indent, meta, arg)
+            }
+        }
+    }
+}
+
+// Implement the Debug trait using the fmt_with_depth function
+impl std::fmt::Debug for ALStmt {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.fmt_with_depth(f, 0) // Start with a depth of 0
+    }
+}
+
 impl Hash for ALStmt {
     fn hash<H: Hasher>(&self, state: &mut H) {
         match self {
@@ -278,6 +391,7 @@ impl Hash for ALStmt {
     }
 }
 
+// #[derive(Clone, Debug)]
 #[derive(Clone)]
 pub enum ALExpr {
     ALBop {
@@ -300,7 +414,6 @@ pub enum ALExpr {
     ALVariable {
         meta: ALMeta,
         name: String,
-        access: Vec<ALExpr>,
     },
     ALNumber {
         meta: ALMeta,
@@ -310,6 +423,41 @@ pub enum ALExpr {
         meta: ALMeta,
         values: Vec<ALExpr>,
     },
+}
+
+// Implement the Debug trait for ALExpr
+impl std::fmt::Debug for ALExpr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use ALExpr::*;
+
+        match self {
+            ALBop { op, lhe, rhe, .. } => {
+                write!(f, "ALBop {{ {:?}, {:?}, {:?} }}", op, lhe, rhe)
+            }
+            ALCmp { op, lhe, rhe, .. } => {
+                write!(f, "ALCmp {{ {:?}, {:?}, {:?} }}", op, lhe, rhe)
+            }
+            ALUop { op, arg, .. } => {
+                write!(f, "ALUop {{ {:?}, {:?} }}", op, arg)
+            }
+            ALVariable { name, .. } => {
+                write!(f, "ALVar{{ {:?} }}", name)
+            }
+            ALNumber { value, .. } => {
+                write!(f, "ALNum{{ {} }}", value) // BigInt is formatted as a regular integer
+            }
+            ALArrayInLine { values, .. } => {
+                write!(f, "ALArrayInLine {{ [",)?;
+                for (i, val) in values.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{:?}", val)?;
+                }
+                write!(f, "] }}")
+            }
+        }
+    }
 }
 
 impl ALExpr {
@@ -325,7 +473,8 @@ impl ALExpr {
                 let new_meta = ALMeta::from_meta(meta);
                 use ExpressionInfixOpcode::*;
                 match infix_op {
-                    Mul | Add | Sub | ShiftL | ShiftR | BoolAnd | BoolOr => {
+                    Mul | Add | Sub | ShiftL | ShiftR | BoolAnd | BoolOr | BitAnd | BitOr
+                    | BitXor => {
                         let op = match infix_op {
                             Mul => ALBopCode::ALMul,
                             Add => ALBopCode::ALAdd,
@@ -334,6 +483,9 @@ impl ALExpr {
                             ShiftR => ALBopCode::ALShr,
                             BoolAnd => ALBopCode::ALAnd,
                             BoolOr => ALBopCode::ALOr,
+                            BitAnd => ALBopCode::ALBitAnd,
+                            BitOr => ALBopCode::ALBitOr,
+                            BitXor => ALBopCode::ALBitXor,
                             _ => panic!("Unreachable"),
                         };
                         ALExpr::ALBop {
@@ -364,7 +516,6 @@ impl ALExpr {
                     Pow => panic!("Pow not supported yet"),
                     IntDiv => panic!("IntDiv not supported yet"),
                     Mod => panic!("Mod not supported yet"),
-                    BitOr | BitAnd | BitXor => panic!("Bitwise operations not supported yet"),
                 }
             }
             PrefixOp {
@@ -390,10 +541,9 @@ impl ALExpr {
                     Complement => panic!("Complement operations not supported yet"),
                 }
             }
-            Variable { meta, name, access } => ALExpr::ALVariable {
+            Variable { meta, name, .. } => ALExpr::ALVariable {
                 meta: ALMeta::from_meta(meta),
                 name: name.clone(),
-                access: ALExpr::from_access(access),
             },
             Number(meta, value) => ALExpr::ALNumber {
                 meta: ALMeta::from_meta(meta),
@@ -422,7 +572,7 @@ impl ALExpr {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum ALBopCode {
     ALMul,
     ALAdd,
@@ -431,9 +581,12 @@ pub enum ALBopCode {
     ALOr,
     ALShl,
     ALShr,
+    ALBitAnd,
+    ALBitOr,
+    ALBitXor,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum ALCmpCode {
     ALLe,
     ALGe,
@@ -443,7 +596,7 @@ pub enum ALCmpCode {
     ALNe,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum ALUopCode {
     ALNeg,
     ALBoolNot,

@@ -1,3 +1,4 @@
+use interval_analysis::analysis_representation::ALStmt;
 use parser::parser_logic::parse_file;
 use program_structure::ast::{Definition::*, AST};
 use program_structure::file_definition::FileLibrary;
@@ -52,12 +53,14 @@ fn main() -> io::Result<()> {
                     is_custom_gate,
                     ..
                 } => {
-                    println!("Template: {}", name);
-                    println!("Args: {:?}", args);
-                    println!("Arg location: {:?}", arg_location);
-                    println!("Body: {:#?}", body);
-                    println!("Parallel: {:?}", parallel);
-                    println!("Is custom gate: {:?}", is_custom_gate);
+                    // println!("Template: {}", name);
+                    // println!("Args: {:?}", args);
+                    // println!("Arg location: {:?}", arg_location);
+                    // println!("Body: {:#?}", body);
+                    // println!("Parallel: {:?}", parallel);
+                    // println!("Is custom gate: {:?}", is_custom_gate);
+                    let al_stmt = ALStmt::from_stmt(body);
+                    println!("{:#?}", al_stmt);
                 }
                 _ => eprintln!("Only accept templates."),
             }

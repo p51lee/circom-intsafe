@@ -10,3 +10,4 @@ repository = "https://github.com/p51lee/circom-intsafe"
 [dependencies]
 parser = {path = "../parser"}
 program_structure = {path = "../program_structure"}
+interval_analysis = {path = "../interval_analysis"}
