@@ -1,26 +1,40 @@
 use crate::analysis_representation::ALCmpCode;
-use num_bigint::BigInt;
+use num_bigint::{BigInt, ToBigUint};
 use std::cmp::{max, min, Ord, PartialOrd};
 use std::collections::{HashMap, HashSet};
-use std::ops::{Add, BitAndAssign, BitOr, BitOrAssign, Mul, Sub};
+use std::ops::{Add, BitAnd, BitOr, BitXor, Mul, Neg, Shl, Shr, Sub};
 
 pub trait CPO: PartialOrd + Sized {
-    type T;
-
-    fn bottom() -> Self::T;
-    fn join(lhs: &Self::T, rhs: &Self::T) -> Self::T;
-    fn widen(lhs: &Self::T, rhs: &Self::T) -> Self::T;
-    fn narrow(lhs: &Self::T, rhs: &Self::T) -> Self::T;
+    fn bottom() -> Self;
+    fn join(lhs: &Self, rhs: &Self) -> Self;
+    fn widen(lhs: &Self, rhs: &Self) -> Self;
+    fn narrow(lhs: &Self, rhs: &Self) -> Self;
 }
 
-pub trait NumericalDomain: CPO {
-    fn top() -> Self::T;
-    fn of_int(i: i32) -> Self::T;
-    fn cmp(pred: ALCmpCode, lhs: &Self::T, rhs: &Self::T) -> Self::T;
-    fn filter(pred: ALCmpCode, lhs: &Self::T, rhs: &Self::T) -> Self::T;
-    fn add(lhs: &Self::T, rhs: &Self::T) -> Self::T;
-    fn sub(lhs: &Self::T, rhs: &Self::T) -> Self::T;
-    fn mul(lhs: &Self::T, rhs: &Self::T) -> Self::T;
+pub trait NumericalDomain:
+    CPO
+    + Add<Self, Output = Self>
+    + Sub<Self, Output = Self>
+    + Mul<Self, Output = Self>
+    + Neg<Output = Self>
+    + BitAnd<Self, Output = Self>
+    + BitOr<Self, Output = Self>
+    + BitXor<Self, Output = Self>
+    + Shl<Self, Output = Self>
+    + Shr<Self, Output = Self>
+{
+    fn top() -> Self;
+    fn from_int(i: i32) -> Self;
+    fn from_bigint(i: BigInt) -> Self;
+    fn cmp(pred: &ALCmpCode, lhs: &Self, rhs: &Self) -> Self;
+    fn filter(pred: ALCmpCode, lhs: &Self, rhs: &Self) -> Self;
+    fn _add(lhs: &Self, rhs: &Self) -> Self;
+    fn _sub(lhs: &Self, rhs: &Self) -> Self;
+    fn _mul(lhs: &Self, rhs: &Self) -> Self;
+    fn _neg(this: &Self) -> Self;
+    fn logic_and(lhs: &Self, rhs: &Self) -> Self;
+    fn logic_or(lhs: &Self, rhs: &Self) -> Self;
+    fn logic_not(this: &Self) -> Self;
 }
 
 pub trait Memory: CPO {
@@ -111,6 +125,71 @@ impl Mul for Elt {
     }
 }
 
+impl Neg for Elt {
+    type Output = Elt;
+    fn neg(self) -> Self::Output {
+        match self {
+            Elt::Int(i) => Elt::Int(-i),
+            Elt::PInf => Elt::MInf,
+            Elt::MInf => Elt::PInf,
+        }
+    }
+}
+
+impl Shl for Elt {
+    type Output = Elt;
+    fn shl(self, rhs: Self) -> Self::Output {
+        match (self, rhs) {
+            (Elt::Int(i1), Elt::Int(i2)) => match i2.to_string().parse::<usize>() {
+                Ok(i2) => Elt::Int(i1 << i2),
+                Err(_) => Elt::PInf,
+            },
+            (Elt::PInf, _) => Elt::PInf,
+            (Elt::MInf, _) => Elt::MInf,
+            (_, Elt::PInf) => Elt::PInf,
+            (_, Elt::MInf) => Elt::of_int(0),
+        }
+    }
+}
+
+impl Shr for Elt {
+    type Output = Elt;
+    fn shr(self, rhs: Self) -> Self::Output {
+        match (self, rhs) {
+            (Elt::Int(i1), Elt::Int(i2)) => match i2.to_string().parse::<usize>() {
+                Ok(i2) => Elt::Int(i1 >> i2),
+                Err(_) => Elt::PInf,
+            },
+            (Elt::PInf, _) => Elt::PInf,
+            (Elt::MInf, _) => Elt::MInf,
+            (_, Elt::PInf) => Elt::of_int(0),
+            (_, Elt::MInf) => Elt::PInf,
+        }
+    }
+}
+
+impl BitOr for Elt {
+    type Output = Elt;
+    fn bitor(self, rhs: Self) -> Self::Output {
+        match (self, rhs) {
+            (Elt::Int(i1), Elt::Int(i2)) => Elt::Int(i1 | i2),
+            (Elt::PInf, _) | (_, Elt::PInf) => Elt::PInf,
+            (Elt::MInf, _) | (_, Elt::MInf) => Elt::of_int(0),
+        }
+    }
+}
+
+impl BitXor for Elt {
+    type Output = Elt;
+    fn bitxor(self, rhs: Self) -> Self::Output {
+        match (self, rhs) {
+            (Elt::Int(i1), Elt::Int(i2)) => Elt::Int(i1 ^ i2),
+            (Elt::PInf, _) | (_, Elt::PInf) => Elt::PInf,
+            (Elt::MInf, _) | (_, Elt::MInf) => Elt::MInf,
+        }
+    }
+}
+
 impl Ord for Elt {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         match (self, other) {
@@ -144,13 +223,10 @@ pub enum Interval {
 }
 
 impl Interval {
-    fn of_bigint(i: BigInt) -> Interval {
-        Interval::Interval(Elt::of_bigint(i.clone()), Elt::of_bigint(i.clone()))
-    }
-    fn of_ints(l: i32, r: i32) -> Interval {
+    fn from_ints(l: i32, r: i32) -> Interval {
         Interval::Interval(Elt::of_int(l), Elt::of_int(r))
     }
-    fn of_elts(l: Elt, r: Elt) -> Interval {
+    fn from_elts(l: Elt, r: Elt) -> Interval {
         if l <= r {
             Interval::Interval(l, r)
         } else {
@@ -158,13 +234,135 @@ impl Interval {
         }
     }
     fn zero_zero() -> Interval {
-        Interval::of_ints(0, 0)
+        Interval::from_ints(0, 0)
     }
     fn one_one() -> Interval {
-        Interval::of_ints(1, 1)
+        Interval::from_ints(1, 1)
     }
     fn zero_one() -> Interval {
-        Interval::of_ints(0, 1)
+        Interval::from_ints(0, 1)
+    }
+    fn _shl(lhs: &Self, rhs: &Self) -> Self {
+        match (lhs, rhs) {
+            (Interval::Bot, _) | (_, Interval::Bot) => Interval::Bot,
+            (Interval::Interval(l1, l2), Interval::Interval(r1, r2)) => {
+                Interval::Interval(l1.clone() << r1.clone(), l2.clone() << r2.clone())
+            }
+        }
+    }
+    fn _shr(lhs: &Self, rhs: &Self) -> Self {
+        match (lhs, rhs) {
+            (Interval::Bot, _) | (_, Interval::Bot) => Interval::Bot,
+            (Interval::Interval(l1, l2), Interval::Interval(r1, r2)) => {
+                Interval::Interval(l1.clone() >> r2.clone(), l2.clone() >> r1.clone())
+            }
+        }
+    }
+    fn _bit_and(lhs: &Self, rhs: &Self) -> Self {
+        match (lhs, rhs) {
+            (Interval::Bot, _) | (_, Interval::Bot) => Interval::Bot,
+            (Interval::Interval(_, l2), Interval::Interval(_, r2)) => {
+                Interval::Interval(Elt::of_int(0), min(l2.clone(), r2.clone()))
+            }
+        }
+    }
+    fn _bit_or(lhs: &Self, rhs: &Self) -> Self {
+        match (lhs, rhs) {
+            (Interval::Bot, _) | (_, Interval::Bot) => Interval::Bot,
+            (Interval::Interval(l1, l2), Interval::Interval(r1, r2)) => {
+                Interval::Interval(max(l1.clone(), r1.clone()), l2.clone() | r2.clone())
+            }
+        }
+    }
+    fn _bit_xor(lhs: &Self, rhs: &Self) -> Self {
+        match (lhs, rhs) {
+            (Interval::Bot, _) | (_, Interval::Bot) => Interval::Bot,
+            (Interval::Interval(l1, l2), Interval::Interval(r1, r2)) => Interval::Interval(
+                Elt::of_int(0),
+                max(l1.clone() ^ r2.clone(), l2.clone() ^ r1.clone()),
+            ),
+        }
+    }
+}
+
+impl Add for Interval {
+    type Output = Interval;
+    fn add(self, rhs: Self) -> Self::Output {
+        Interval::_add(&self, &rhs)
+    }
+}
+impl Add for &Interval {
+    type Output = Interval;
+    fn add(self, rhs: Self) -> Self::Output {
+        Interval::_add(self, rhs)
+    }
+}
+
+impl Sub for Interval {
+    type Output = Interval;
+    fn sub(self, rhs: Self) -> Self::Output {
+        Interval::_sub(&self, &rhs)
+    }
+}
+impl Sub for &Interval {
+    type Output = Interval;
+    fn sub(self, rhs: Self) -> Self::Output {
+        Interval::_sub(self, rhs)
+    }
+}
+
+impl Mul for Interval {
+    type Output = Interval;
+    fn mul(self, rhs: Self) -> Self::Output {
+        Interval::_mul(&self, &rhs)
+    }
+}
+impl Mul for &Interval {
+    type Output = Interval;
+    fn mul(self, rhs: Self) -> Self::Output {
+        Interval::_mul(self, rhs)
+    }
+}
+
+impl Neg for Interval {
+    type Output = Interval;
+    fn neg(self) -> Self::Output {
+        Interval::_neg(&self)
+    }
+}
+
+impl Shl for Interval {
+    type Output = Interval;
+    fn shl(self, rhs: Self) -> Self::Output {
+        Interval::_shl(&self, &rhs)
+    }
+}
+
+impl Shr for Interval {
+    type Output = Interval;
+    fn shr(self, rhs: Self) -> Self::Output {
+        Interval::_shr(&self, &rhs)
+    }
+}
+
+impl BitAnd for Interval {
+    type Output = Interval;
+    fn bitand(self, rhs: Self) -> Self::Output {
+        Interval::_bit_and(&self, &rhs)
+    }
+}
+
+impl BitOr for Interval {
+    type Output = Interval;
+    fn bitor(self, rhs: Self) -> Self::Output {
+        Interval::_bit_or(&self, &rhs)
+    }
+}
+
+impl BitXor for Interval {
+    type Output = Interval;
+    fn bitxor(self, rhs: Self) -> Self::Output {
+        Interval::_bit_xor(&self, &rhs)
     }
 }
 
@@ -190,13 +388,11 @@ impl PartialOrd for Interval {
 }
 
 impl CPO for Interval {
-    type T = Interval;
-
-    fn bottom() -> Self::T {
+    fn bottom() -> Self {
         Interval::Bot
     }
 
-    fn join(lhs: &Self::T, rhs: &Self::T) -> Self::T {
+    fn join(lhs: &Self, rhs: &Self) -> Self {
         match (lhs, rhs) {
             (Interval::Bot, _) => rhs.clone(),
             (_, Interval::Bot) => lhs.clone(),
@@ -206,7 +402,7 @@ impl CPO for Interval {
         }
     }
 
-    fn widen(lhs: &Self::T, rhs: &Self::T) -> Self::T {
+    fn widen(lhs: &Self, rhs: &Self) -> Self {
         match (lhs, rhs) {
             (Interval::Bot, _) => rhs.clone(),
             (_, Interval::Bot) => lhs.clone(),
@@ -217,7 +413,7 @@ impl CPO for Interval {
         }
     }
 
-    fn narrow(lhs: &Self::T, rhs: &Self::T) -> Self::T {
+    fn narrow(lhs: &Self, rhs: &Self) -> Self {
         match (lhs, rhs) {
             (Interval::Bot, _) => Interval::Bot,
             (_, Interval::Bot) => lhs.clone(),
@@ -235,34 +431,13 @@ impl CPO for Interval {
     }
 }
 
-/** For concise joining */
-impl BitOr for &Interval {
-    type Output = Interval;
-    fn bitor(self, rhs: Self) -> Self::Output {
-        Interval::join(self, rhs)
-    }
-}
-
 /** For concise widening */
-impl BitOrAssign for Interval {
-    fn bitor_assign(&mut self, rhs: Self) {
-        *self = Interval::widen(self, &rhs);
-    }
-}
-
-/** For concise narrowing */
-impl BitAndAssign for Interval {
-    fn bitand_assign(&mut self, rhs: Self) {
-        *self = Interval::narrow(self, &rhs);
-    }
-}
-
 impl NumericalDomain for Interval {
-    fn top() -> Self::T {
+    fn top() -> Self {
         Interval::Interval(Elt::MInf, Elt::PInf)
     }
 
-    fn cmp(pred: ALCmpCode, lhs: &Self::T, rhs: &Self::T) -> Self::T {
+    fn cmp(pred: &ALCmpCode, lhs: &Self, rhs: &Self) -> Self {
         match (pred, lhs, rhs) {
             (_, Interval::Bot, _) | (_, _, Interval::Bot) => Interval::Bot,
             (ALCmpCode::ALEq, Interval::Interval(l1, l2), Interval::Interval(r1, r2)) => {
@@ -322,13 +497,13 @@ impl NumericalDomain for Interval {
         }
     }
 
-    fn filter(pred: ALCmpCode, lhs: &Self::T, rhs: &Self::T) -> Self::T {
+    fn filter(pred: ALCmpCode, lhs: &Self, rhs: &Self) -> Self {
         match (pred, lhs, rhs) {
             (_, Interval::Bot, _) | (_, _, Interval::Bot) => Interval::Bot,
             (ALCmpCode::ALEq, Interval::Interval(l1, l2), Interval::Interval(r1, r2)) => {
                 let left = max(l1.clone(), r1.clone());
                 let right = min(l2.clone(), r2.clone());
-                Interval::of_elts(left, right)
+                Interval::from_elts(left, right)
             }
             (ALCmpCode::ALNe, Interval::Interval(l1, l2), Interval::Interval(r1, r2)) => {
                 let left = if r1 == r2 && r2 == l1 {
@@ -341,34 +516,37 @@ impl NumericalDomain for Interval {
                 } else {
                     l2.clone()
                 };
-                Interval::of_elts(left, right)
+                Interval::from_elts(left, right)
             }
             (ALCmpCode::ALGe, Interval::Interval(l1, l2), Interval::Interval(r1, r2)) => {
                 let left = max(l1.clone(), r1.clone());
                 let right = l2.clone();
-                Interval::of_elts(left, right)
+                Interval::from_elts(left, right)
             }
             (ALCmpCode::ALGt, Interval::Interval(l1, l2), Interval::Interval(r1, r2)) => {
                 let left = max(l1.clone(), r1.clone() + Elt::of_int(1));
                 let right = l2.clone();
-                Interval::of_elts(left, right)
+                Interval::from_elts(left, right)
             }
             (ALCmpCode::ALLe, Interval::Interval(l1, l2), Interval::Interval(r1, r2)) => {
                 let left = l1.clone();
                 let right = min(l2.clone(), r2.clone());
-                Interval::of_elts(left, right)
+                Interval::from_elts(left, right)
             }
             (ALCmpCode::ALLt, Interval::Interval(l1, l2), Interval::Interval(r1, r2)) => {
                 let left = l1.clone();
                 let right = min(l2.clone(), r2.clone() - Elt::of_int(1));
-                Interval::of_elts(left, right)
+                Interval::from_elts(left, right)
             }
         }
     }
-    fn of_int(i: i32) -> Self::T {
-        Interval::of_ints(i, i)
+    fn from_int(i: i32) -> Self {
+        Interval::from_ints(i, i)
     }
-    fn add(lhs: &Self::T, rhs: &Self::T) -> Self::T {
+    fn from_bigint(i: BigInt) -> Self {
+        Interval::Interval(Elt::of_bigint(i.clone()), Elt::of_bigint(i.clone()))
+    }
+    fn _add(lhs: &Self, rhs: &Self) -> Self {
         match (lhs, rhs) {
             (Interval::Bot, _) | (_, Interval::Bot) => Interval::Bot,
             (Interval::Interval(l1, l2), Interval::Interval(r1, r2)) => {
@@ -376,7 +554,7 @@ impl NumericalDomain for Interval {
             }
         }
     }
-    fn sub(lhs: &Self::T, rhs: &Self::T) -> Self::T {
+    fn _sub(lhs: &Self, rhs: &Self) -> Self {
         match (lhs, rhs) {
             (Interval::Bot, _) | (_, Interval::Bot) => Interval::Bot,
             (Interval::Interval(l1, l2), Interval::Interval(r1, r2)) => {
@@ -384,7 +562,7 @@ impl NumericalDomain for Interval {
             }
         }
     }
-    fn mul(lhs: &Self::T, rhs: &Self::T) -> Self::T {
+    fn _mul(lhs: &Self, rhs: &Self) -> Self {
         match (lhs, rhs) {
             (Interval::Bot, _) | (_, Interval::Bot) => Interval::Bot,
             (Interval::Interval(l1, l2), Interval::Interval(r1, r2)) => {
@@ -399,26 +577,33 @@ impl NumericalDomain for Interval {
             }
         }
     }
-}
-
-impl Add for &Interval {
-    type Output = Interval;
-    fn add(self, rhs: Self) -> Self::Output {
-        Interval::add(self, rhs)
+    fn _neg(this: &Self) -> Self {
+        match this {
+            Interval::Bot => Interval::Bot,
+            Interval::Interval(l1, l2) => Interval::Interval(-l2.clone(), -l1.clone()),
+        }
     }
-}
-
-impl Sub for &Interval {
-    type Output = Interval;
-    fn sub(self, rhs: Self) -> Self::Output {
-        Interval::sub(self, rhs)
+    fn logic_and(lhs: &Self, rhs: &Self) -> Self {
+        match (lhs, rhs) {
+            (Interval::Bot, _) | (_, Interval::Bot) => Interval::Bot,
+            (Interval::Interval(l1, l2), Interval::Interval(r1, r2)) => {
+                Interval::Interval(max(l1.clone(), r1.clone()), min(l2.clone(), r2.clone()))
+            }
+        }
     }
-}
-
-impl Mul for &Interval {
-    type Output = Interval;
-    fn mul(self, rhs: Self) -> Self::Output {
-        Interval::mul(self, rhs)
+    fn logic_or(lhs: &Self, rhs: &Self) -> Self {
+        match (lhs, rhs) {
+            (Interval::Bot, _) | (_, Interval::Bot) => Interval::Bot,
+            (Interval::Interval(l1, l2), Interval::Interval(r1, r2)) => {
+                Interval::Interval(min(l1.clone(), r1.clone()), max(l2.clone(), r2.clone()))
+            }
+        }
+    }
+    fn logic_not(this: &Self) -> Self {
+        match this {
+            Interval::Bot => Interval::Bot,
+            Interval::Interval(l1, l2) => Interval::Interval(l2.clone(), l1.clone()),
+        }
     }
 }
 
@@ -485,27 +670,26 @@ impl PartialOrd for IntervalMemory {
 }
 
 impl CPO for IntervalMemory {
-    type T = IntervalMemory;
-    fn bottom() -> Self::T {
+    fn bottom() -> Self {
         IntervalMemory {
             memory: HashMap::new(),
         }
     }
-    fn join(lhs: &Self::T, rhs: &Self::T) -> Self::T {
+    fn join(lhs: &Self, rhs: &Self) -> Self {
         let mut new_memory = lhs.memory.clone();
         for (key, value) in &rhs.memory {
             if let Some(lhs_value) = lhs.memory.get(key) {
-                new_memory.insert(key.clone(), lhs_value | value);
+                new_memory.insert(key.clone(), Interval::join(lhs_value, value));
             } else {
                 new_memory.insert(key.clone(), value.clone());
             }
         }
         IntervalMemory::from_hashmap(new_memory)
     }
-    fn widen(lhs: &Self::T, rhs: &Self::T) -> Self::T {
+    fn widen(lhs: &Self, rhs: &Self) -> Self {
         IntervalMemory::merge(lhs, rhs, Interval::widen)
     }
-    fn narrow(lhs: &Self::T, rhs: &Self::T) -> Self::T {
+    fn narrow(lhs: &Self, rhs: &Self) -> Self {
         IntervalMemory::merge(lhs, rhs, Interval::narrow)
     }
 }
