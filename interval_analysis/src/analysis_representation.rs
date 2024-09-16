@@ -35,6 +35,104 @@ impl std::fmt::Debug for ALMeta {
 }
 
 #[derive(Clone)]
+enum ALAtomic {
+    Var(String),
+    Num(BigInt),
+}
+
+impl ALAtomic {
+    pub fn from_expr(expr: &Expression) -> ALAtomic {
+        use Expression::*;
+        match expr {
+            Variable { name, .. } => ALAtomic::Var(name.clone()),
+            Number(_, value) => ALAtomic::Num(value.clone()),
+            _ => panic!("Only variables and numbers are atomic"),
+        }
+    }
+}
+
+impl std::fmt::Debug for ALAtomic {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use ALAtomic::*;
+        match self {
+            Var(name) => write!(f, "Var({})", name),
+            Num(value) => write!(f, "Num({})", value.to_string()),
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct ALCond {
+    pub lhs: ALAtomic,
+    pub rhs: ALAtomic,
+    pub pred: ALCmpCode,
+}
+
+// TODO: Implement the case of only one operand
+impl ALCond {
+    pub fn from_expr(expr: &Expression) -> ALCond {
+        use Expression::*;
+        match expr {
+            InfixOp {
+                meta,
+                lhe,
+                infix_op,
+                rhe,
+            } => {
+                let new_meta = ALMeta::from_meta(meta);
+                use ExpressionInfixOpcode::*;
+                match infix_op {
+                    Mul | Add | Sub | ShiftL | ShiftR | BoolAnd | BoolOr | BitAnd | BitOr
+                    | BitXor | Div | IntDiv | Pow | Mod => {
+                        panic!("Binary operations not supported in conditions yet")
+                    }
+                    LesserEq | GreaterEq | Lesser | Greater | Eq | NotEq => {
+                        let pred = match infix_op {
+                            LesserEq => ALCmpCode::ALLe,
+                            GreaterEq => ALCmpCode::ALGe,
+                            Lesser => ALCmpCode::ALLt,
+                            Greater => ALCmpCode::ALGt,
+                            Eq => ALCmpCode::ALEq,
+                            NotEq => ALCmpCode::ALNe,
+                            _ => panic!("Unreachable"),
+                        };
+                        ALCond {
+                            lhs: ALAtomic::from_expr(lhe),
+                            rhs: ALAtomic::from_expr(rhe),
+                            pred,
+                        }
+                    }
+                }
+            }
+            PrefixOp { .. } => panic!("Prefix operations not supported in conditions"),
+            Variable { name, .. } => ALCond {
+                lhs: ALAtomic::Var(name.clone()),
+                rhs: ALAtomic::Num(BigInt::from(1)),
+                pred: ALCmpCode::ALGe,
+            },
+            Number(_, value) => ALCond {
+                lhs: ALAtomic::Num(value.clone()),
+                rhs: ALAtomic::Num(BigInt::from(1)),
+                pred: ALCmpCode::ALGe,
+            },
+            ArrayInLine { .. } => panic!("Array literals not supported in conditions"),
+            InlineSwitchOp { .. } => panic!("InlineSwitchOp not supported in conditions"),
+            ParallelOp { .. } => panic!("ParallelOp not supported in conditions"),
+            Call { .. } => panic!("Call not supported in conditions"),
+            AnonymousComp { .. } => panic!("AnonymousComp not supported in conditions"),
+            Tuple { .. } => panic!("Tuple not supported in conditions"),
+            UniformArray { .. } => panic!("UniformArray not supported in conditions"),
+        }
+    }
+}
+
+impl std::fmt::Debug for ALCond {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?} {:?} {:?}", self.lhs, self.pred, self.rhs)
+    }
+}
+
+#[derive(Clone)]
 // #[derive(Clone, Debug)]
 pub enum ALStmt {
     ALEmpty {
@@ -48,7 +146,7 @@ pub enum ALStmt {
     },
     ALIfThenElse {
         meta: ALMeta,
-        cond: ALExpr,
+        cond: ALCond,
         if_case: Box<ALStmt>,
         else_case: Option<Box<ALStmt>>,
         next_true: ALMeta,
@@ -86,6 +184,7 @@ impl ALStmt {
         al_stmt.init_next(None);
         al_stmt
     }
+    fn extract_pred(expr: ALExpr) -> () {}
     fn meta(&self) -> ALMeta {
         use ALStmt::*;
         match self {
@@ -216,7 +315,7 @@ impl ALStmt {
                     .map(|stmt| ALStmt::from_stmt_suppl(&*stmt));
                 ALStmt::ALIfThenElse {
                     meta: ALMeta::from_meta(meta),
-                    cond: ALExpr::from_expr(cond),
+                    cond: ALCond::from_expr(cond),
                     if_case: Box::new(if_stmt),
                     else_case: else_stmt.map(|stmt| Box::new(stmt)),
                     next_true: ALMeta::empty(),
@@ -311,9 +410,7 @@ impl ALStmt {
             },
         }
     }
-}
 
-impl ALStmt {
     // Helper function to format the statement with depth tracking
     fn fmt_with_depth(&self, f: &mut std::fmt::Formatter<'_>, depth: usize) -> std::fmt::Result {
         use ALStmt::*;
