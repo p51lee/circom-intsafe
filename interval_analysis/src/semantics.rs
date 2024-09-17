@@ -48,7 +48,20 @@ trait Semantics {
             }
         }
     }
-    fn filter(cond: ALCond, truth: bool, memory: Self::M) -> Self::M;
+    fn filter(cond: ALCond, truth: bool, mut memory: Self::M) -> Self::M {
+        let ALCond { lhs, rhs, pred } = cond;
+        let lhv = Self::eval(&lhs.to_al_expr(), &memory);
+        let rhv = Self::eval(&rhs.to_al_expr(), &memory);
+        let pred = if truth { pred } else { pred.negate() };
+        let pred_flip = pred.flip();
+        if let ALAtomic::Var(lhs_name) = lhs {
+            memory.add(lhs_name, Self::V::filter(pred, &lhv, &rhv))
+        }
+        if let ALAtomic::Var(rhs_name) = rhs {
+            memory.add(rhs_name, Self::V::filter(pred_flip, &rhv, &lhv))
+        }
+        memory
+    }
     fn transfer(stmt: ALStmt, memory: Self::M) -> Vec<(ALMeta, Self::M)>;
     fn transfer_meta(meta: ALMeta, memory: Self::M) -> Vec<(ALMeta, Self::M)>;
 }

@@ -41,6 +41,7 @@ pub trait Memory: CPO {
     type K;
     type V: NumericalDomain;
     fn find(&self, key: &Self::K) -> Self::V;
+    fn add(&mut self, key: Self::K, value: Self::V);
 }
 
 pub trait Table {
@@ -699,6 +700,9 @@ impl Memory for IntervalMemory {
     type V = Interval;
     fn find(&self, key: &Self::K) -> Self::V {
         self.memory.get(key).unwrap_or(&Interval::Bot).clone()
+    }
+    fn add(&mut self, key: Self::K, value: Self::V) {
+        self.memory.insert(key, value);
     }
 }
 

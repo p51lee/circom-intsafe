@@ -35,7 +35,7 @@ impl std::fmt::Debug for ALMeta {
 }
 
 #[derive(Clone)]
-enum ALAtomic {
+pub enum ALAtomic {
     Var(String),
     Num(BigInt),
 }
@@ -47,6 +47,19 @@ impl ALAtomic {
             Variable { name, .. } => ALAtomic::Var(name.clone()),
             Number(_, value) => ALAtomic::Num(value.clone()),
             _ => panic!("Only variables and numbers are atomic"),
+        }
+    }
+    pub fn to_al_expr(&self) -> ALExpr {
+        use ALAtomic::*;
+        match self {
+            Var(name) => ALExpr::ALVariable {
+                meta: ALMeta::empty(),
+                name: name.clone(),
+            },
+            Num(value) => ALExpr::ALNumber {
+                meta: ALMeta::empty(),
+                value: value.clone(),
+            },
         }
     }
 }
@@ -68,7 +81,6 @@ pub struct ALCond {
     pub pred: ALCmpCode,
 }
 
-// TODO: Implement the case of only one operand
 impl ALCond {
     pub fn from_expr(expr: &Expression) -> ALCond {
         use Expression::*;
@@ -691,6 +703,31 @@ pub enum ALCmpCode {
     ALGt,
     ALEq,
     ALNe,
+}
+
+impl ALCmpCode {
+    pub fn negate(&self) -> ALCmpCode {
+        use ALCmpCode::*;
+        match self {
+            ALLe => ALGt,
+            ALGe => ALLt,
+            ALLt => ALGe,
+            ALGt => ALLe,
+            ALEq => ALNe,
+            ALNe => ALEq,
+        }
+    }
+    pub fn flip(&self) -> ALCmpCode {
+        use ALCmpCode::*;
+        match self {
+            ALLe => ALGe,
+            ALGe => ALLe,
+            ALLt => ALGt,
+            ALGt => ALLt,
+            ALEq => ALEq,
+            ALNe => ALNe,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
