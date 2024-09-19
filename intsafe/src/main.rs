@@ -97,15 +97,7 @@ fn main() -> io::Result<()> {
             eprintln!("Includes are not supported.");
         } else if let [template] = definitions.as_slice() {
             match template {
-                Template {
-                    name,
-                    args,
-                    arg_location,
-                    body,
-                    parallel,
-                    is_custom_gate,
-                    ..
-                } => {
+                Template { args, body, .. } => {
                     let al_stmt = ALStmt::from_stmt(body);
                     if print_ir {
                         println!("{:#?}", al_stmt);

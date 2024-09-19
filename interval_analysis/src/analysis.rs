@@ -3,6 +3,11 @@ use crate::domain::{Elt, Interval, IntervalMemory, IntervalTable, Memory, Table,
 use crate::semantics::{IntervalSemantics, Semantics};
 use num_bigint::BigInt;
 
+enum Phase {
+    Widen,
+    Narrow,
+}
+
 pub struct IntervalAnalyzer {
     program: ALStmt,
     parameters: Vec<String>,
@@ -38,15 +43,6 @@ impl IntervalAnalyzer {
 
     pub fn check_all(&self) {
         let all_instrs = self.program.all_instrs();
-        // for param in &self.parameters {
-        //     let mut range = Interval::bottom();
-        //     for meta in self.program.all_metas() {
-        //         let memory = self.table.find(&meta);
-        //         let val = memory.find(param);
-        //         range = Interval::join(&range, &val);
-        //     }
-        //     self.print_var_range(param, range);
-        // }
         for inst in all_instrs {
             let memory = self.table.find(&inst.meta());
             self.check_instr(inst, memory, self.prime.clone());
@@ -133,53 +129,3 @@ impl IntervalAnalyzer {
         );
     }
 }
-
-enum Phase {
-    Widen,
-    Narrow,
-}
-
-// pub fn run(al_program: ALStmt, phase: Phase) -> IntervalTable {
-//     let semantics = IntervalSemantics::new(&al_program);
-//     let all_metas = al_program.all_metas();
-
-//     let mut worklist = Worklist::new(&al_program);
-//     let mut table = IntervalTable::new(&al_program);
-
-//     while let Some(work) = worklist.pop() {
-//         let old_memory = table.find(&work);
-//         let new_memory = all_metas
-//             .iter()
-//             .map(|meta| semantics.transfer_meta(Some(meta.clone()), table.find(&meta)))
-//             .flatten()
-//             .filter_map(
-//                 |(meta, memory)| {
-//                     if meta == work {
-//                         Some(memory)
-//                     } else {
-//                         None
-//                     }
-//                 },
-//             )
-//             .fold(IntervalMemory::bottom(), |acc, x| {
-//                 IntervalMemory::join(&acc, &x)
-//             });
-
-//         let final_memory = match phase {
-//             Phase::Widen => IntervalMemory::widen(&old_memory, &new_memory),
-//             Phase::Narrow => IntervalMemory::narrow(&old_memory, &new_memory),
-//         };
-//         let successors = semantics
-//             .transfer_meta(Some(work.clone()), final_memory.clone())
-//             .iter()
-//             .map(|(m, mem)| m.clone())
-//             .collect::<Vec<_>>();
-//         if !(final_memory <= old_memory) {
-//             table.add(work.clone(), final_memory);
-//             for succ in successors {
-//                 worklist.push(succ);
-//             }
-//         }
-//     }
-//     table
-// }
