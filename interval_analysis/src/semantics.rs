@@ -4,7 +4,7 @@ use std::vec;
 use crate::analysis_representation::*;
 use crate::domain::{Interval, IntervalMemory, Memory, NumericalDomain, CPO};
 
-trait Semantics {
+pub trait Semantics {
     type V: NumericalDomain;
     type M: Memory<K = String, V = Self::V>;
 
@@ -70,6 +70,11 @@ trait Semantics {
         match stmt {
             ALEmpty { next, .. } => vec![(next, memory)],
             ALBlock { next, .. } => vec![(next, memory)],
+            ALInput { name, next, .. } => {
+                let mut new_memory = memory.clone();
+                new_memory.add(name, Self::V::top());
+                vec![(next, new_memory)]
+            }
             ALIfThenElse {
                 cond,
                 next_true,
@@ -122,12 +127,12 @@ trait Semantics {
     fn instr_from_meta(&self, meta: ALMeta) -> ALStmt;
 }
 
-struct IntervalSemantics {
+pub struct IntervalSemantics {
     instr_map: HashMap<ALMeta, ALStmt>,
 }
 
 impl IntervalSemantics {
-    fn new(al_program: &ALStmt) -> Self {
+    pub fn new(al_program: &ALStmt) -> Self {
         let all_ins = al_program.all_instrs();
         let mut instr_map = HashMap::new();
         for ins in all_ins {

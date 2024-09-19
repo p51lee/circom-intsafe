@@ -86,12 +86,8 @@ impl ALCond {
         use Expression::*;
         match expr {
             InfixOp {
-                meta,
-                lhe,
-                infix_op,
-                rhe,
+                lhe, infix_op, rhe, ..
             } => {
-                let new_meta = ALMeta::from_meta(meta);
                 use ExpressionInfixOpcode::*;
                 match infix_op {
                     Mul | Add | Sub | ShiftL | ShiftR | BoolAnd | BoolOr | BitAnd | BitOr
@@ -156,6 +152,11 @@ pub enum ALStmt {
         stmts: Vec<ALStmt>,
         next: Option<ALMeta>,
     },
+    ALInput {
+        meta: ALMeta,
+        name: String,
+        next: Option<ALMeta>,
+    },
     ALIfThenElse {
         meta: ALMeta,
         cond: ALCond,
@@ -201,6 +202,7 @@ impl ALStmt {
         match self {
             ALEmpty { next, .. }
             | ALBlock { next, .. }
+            | ALInput { next, .. }
             | ALAssign { next, .. }
             | ALAssert { next, .. } => vec![*next],
             ALIfThenElse {
@@ -221,6 +223,7 @@ impl ALStmt {
         match self {
             ALEmpty { meta, .. }
             | ALBlock { meta, .. }
+            | ALInput { meta, .. }
             | ALIfThenElse { meta, .. }
             | ALWhile { meta, .. }
             | ALReturn { meta, .. }
@@ -229,7 +232,7 @@ impl ALStmt {
         }
     }
     fn first_stmt(&self) -> &ALStmt {
-        use ALStmt::*;
+        // use ALStmt::*;
         match self {
             // ALBlock { stmts, .. } => stmts.first().map_or(self, |stmt| stmt.first_stmt()),
             _ => self,
@@ -241,7 +244,10 @@ impl ALStmt {
         use ALStmt::*;
         match self {
             ALReturn { .. } => {}
-            ALEmpty { next: n, .. } | ALAssign { next: n, .. } | ALAssert { next: n, .. } => {
+            ALEmpty { next: n, .. }
+            | ALInput { next: n, .. }
+            | ALAssign { next: n, .. }
+            | ALAssert { next: n, .. } => {
                 *n = next;
             }
             ALBlock { stmts, next: n, .. } => {
@@ -392,9 +398,18 @@ impl ALStmt {
                     }
                 }
             }
-            Declaration { meta, .. } => ALStmt::ALEmpty {
-                meta: ALMeta::from_meta(meta),
-                next: None,
+            Declaration {
+                meta, xtype, name, ..
+            } => match xtype {
+                VariableType::Signal(SignalType::Input, _) => ALStmt::ALInput {
+                    meta: ALMeta::from_meta(meta),
+                    name: name.clone(),
+                    next: None,
+                },
+                _ => ALStmt::ALEmpty {
+                    meta: ALMeta::from_meta(meta),
+                    next: None,
+                },
             },
             Substitution { meta, var, rhe, .. } => ALStmt::ALAssign {
                 meta: ALMeta::from_meta(meta),
@@ -468,10 +483,47 @@ impl ALStmt {
             ALWhile { body, .. } => {
                 body.all_instrs_suppl(instrs);
             }
-            ALEmpty { .. } | ALReturn { .. } | ALAssign { .. } | ALAssert { .. } => (),
+            ALEmpty { .. }
+            | ALInput { .. }
+            | ALReturn { .. }
+            | ALAssign { .. }
+            | ALAssert { .. } => (),
         }
     }
 
+    pub fn all_metas(&self) -> Vec<ALMeta> {
+        let mut metas = Vec::new();
+        self.all_metas_suppl(&mut metas);
+        metas
+    }
+
+    fn all_metas_suppl(&self, metas: &mut Vec<ALMeta>) {
+        metas.push(self.meta());
+        use ALStmt::*;
+        match self {
+            ALBlock { stmts, .. } => {
+                for stmt in stmts.iter() {
+                    stmt.all_metas_suppl(metas);
+                }
+            }
+            ALIfThenElse {
+                if_case, else_case, ..
+            } => {
+                if_case.all_metas_suppl(metas);
+                if let Some(else_case) = else_case {
+                    else_case.all_metas_suppl(metas);
+                }
+            }
+            ALWhile { body, .. } => {
+                body.all_metas_suppl(metas);
+            }
+            ALEmpty { .. }
+            | ALInput { .. }
+            | ALReturn { .. }
+            | ALAssign { .. }
+            | ALAssert { .. } => (),
+        }
+    }
     // Helper function to format the statement with depth tracking
     fn fmt_with_depth(&self, f: &mut std::fmt::Formatter<'_>, depth: usize) -> std::fmt::Result {
         use ALStmt::*;
@@ -489,6 +541,9 @@ impl ALStmt {
                     stmt.fmt_with_depth(f, depth + 1)?; // Increase the depth for nested statements
                 }
                 Ok(())
+            }
+            ALInput { meta, name, next } => {
+                write!(f, "{}Input: {:?} {} \t--> {:?}", indent, meta, name, next)
             }
             ALIfThenElse {
                 meta,
@@ -571,6 +626,7 @@ impl Hash for ALStmt {
         match self {
             ALStmt::ALEmpty { meta, .. } => meta.hash(state),
             ALStmt::ALBlock { meta, .. } => meta.hash(state),
+            ALStmt::ALInput { meta, .. } => meta.hash(state),
             ALStmt::ALIfThenElse { meta, .. } => meta.hash(state),
             ALStmt::ALWhile { meta, .. } => meta.hash(state),
             ALStmt::ALReturn { meta, .. } => meta.hash(state),

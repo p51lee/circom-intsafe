@@ -1,4 +1,4 @@
-use crate::analysis_representation::{ALCmpCode, ALMeta};
+use crate::analysis_representation::{ALCmpCode, ALMeta, ALStmt};
 use num_bigint::{BigInt, ToBigUint};
 use std::cmp::{max, min, Ord, PartialOrd};
 use std::collections::{HashMap, HashSet};
@@ -40,6 +40,7 @@ pub trait NumericalDomain:
 pub trait Memory: CPO + Clone {
     type K;
     type V: NumericalDomain;
+    fn from_params(params: &Vec<String>) -> Self;
     fn find(&self, key: &Self::K) -> Self::V;
     fn add(&mut self, key: Self::K, value: Self::V);
 }
@@ -48,9 +49,10 @@ pub trait Table {
     type L;
     type M: Memory;
     fn find(&self, label: &Self::L) -> Self::M;
+    fn add(&mut self, label: Self::L, memory: Self::M);
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub enum Elt {
     Int(BigInt),
     PInf,
@@ -58,12 +60,22 @@ pub enum Elt {
 }
 
 impl Elt {
-    fn of_bigint(i: BigInt) -> Elt {
+    pub fn of_bigint(i: BigInt) -> Elt {
         Elt::Int(i)
     }
 
     fn of_int(i: i32) -> Elt {
         Elt::Int(BigInt::from(i))
+    }
+}
+
+impl std::fmt::Debug for Elt {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Elt::Int(i) => write!(f, "{}", i),
+            Elt::PInf => write!(f, "+∞"),
+            Elt::MInf => write!(f, "-∞"),
+        }
     }
 }
 
@@ -217,7 +229,7 @@ impl PartialOrd for Elt {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub enum Interval {
     Bot,
     Interval(Elt, Elt),
@@ -282,6 +294,15 @@ impl Interval {
                 Elt::of_int(0),
                 max(l1.clone() ^ r2.clone(), l2.clone() ^ r1.clone()),
             ),
+        }
+    }
+}
+
+impl std::fmt::Debug for Interval {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Interval::Bot => write!(f, "⊥"),
+            Interval::Interval(l, r) => write!(f, "[{:?}, {:?}]", l, r),
         }
     }
 }
@@ -704,10 +725,28 @@ impl Memory for IntervalMemory {
     fn add(&mut self, key: Self::K, value: Self::V) {
         self.memory.insert(key, value);
     }
+    fn from_params(params: &Vec<String>) -> Self {
+        let mut memory = HashMap::new();
+        for param in params {
+            memory.insert(param.clone(), Interval::Interval(Elt::MInf, Elt::PInf));
+        }
+        IntervalMemory::from_hashmap(memory)
+    }
 }
 
+#[derive(Debug)]
 pub struct IntervalTable {
     table: HashMap<ALMeta, IntervalMemory>,
+}
+
+impl IntervalTable {
+    pub fn new(al_program: &ALStmt) -> IntervalTable {
+        let mut table = HashMap::new();
+        for m in al_program.all_metas() {
+            table.insert(m.clone(), IntervalMemory::bottom());
+        }
+        IntervalTable { table }
+    }
 }
 
 impl Table for IntervalTable {
@@ -718,5 +757,38 @@ impl Table for IntervalTable {
             .get(label)
             .unwrap_or(&IntervalMemory::bottom())
             .clone()
+    }
+    fn add(&mut self, label: Self::L, memory: Self::M) {
+        self.table.insert(label, memory);
+    }
+}
+
+pub struct Worklist {
+    list: HashSet<ALMeta>,
+}
+
+impl Worklist {
+    pub fn new(al_program: &ALStmt) -> Worklist {
+        let mut list = HashSet::new();
+        for m in al_program.all_metas() {
+            list.insert(m);
+        }
+        Worklist { list }
+    }
+
+    pub fn pop(&mut self) -> Option<ALMeta> {
+        let mut next = None;
+        for m in &self.list {
+            next = Some(m.clone());
+            break;
+        }
+        next.map(|m| {
+            self.list.remove(&m);
+            m
+        })
+    }
+
+    pub fn push(&mut self, meta: ALMeta) {
+        self.list.insert(meta);
     }
 }

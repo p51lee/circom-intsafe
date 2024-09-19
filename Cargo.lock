@@ -73,6 +73,7 @@ name = "circom-intsafe"
 version = "0.1.0"
 dependencies = [
  "interval_analysis",
+ "num-bigint-dig",
  "parser",
  "program_structure",
 ]
