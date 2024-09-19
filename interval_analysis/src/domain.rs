@@ -1,4 +1,4 @@
-use crate::analysis_representation::ALCmpCode;
+use crate::analysis_representation::{ALCmpCode, ALMeta};
 use num_bigint::{BigInt, ToBigUint};
 use std::cmp::{max, min, Ord, PartialOrd};
 use std::collections::{HashMap, HashSet};
@@ -37,7 +37,7 @@ pub trait NumericalDomain:
     fn logic_not(this: &Self) -> Self;
 }
 
-pub trait Memory: CPO {
+pub trait Memory: CPO + Clone {
     type K;
     type V: NumericalDomain;
     fn find(&self, key: &Self::K) -> Self::V;
@@ -707,5 +707,16 @@ impl Memory for IntervalMemory {
 }
 
 pub struct IntervalTable {
-    table: HashMap<String, IntervalMemory>,
+    table: HashMap<ALMeta, IntervalMemory>,
+}
+
+impl Table for IntervalTable {
+    type L = ALMeta;
+    type M = IntervalMemory;
+    fn find(&self, label: &Self::L) -> Self::M {
+        self.table
+            .get(label)
+            .unwrap_or(&IntervalMemory::bottom())
+            .clone()
+    }
 }

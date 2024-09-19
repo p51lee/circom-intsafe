@@ -1,5 +1,8 @@
+use std::collections::HashMap;
+use std::vec;
+
 use crate::analysis_representation::*;
-use crate::domain::{Memory, NumericalDomain, CPO};
+use crate::domain::{Interval, IntervalMemory, Memory, NumericalDomain, CPO};
 
 trait Semantics {
     type V: NumericalDomain;
@@ -62,6 +65,83 @@ trait Semantics {
         }
         memory
     }
-    fn transfer(stmt: ALStmt, memory: Self::M) -> Vec<(ALMeta, Self::M)>;
-    fn transfer_meta(meta: ALMeta, memory: Self::M) -> Vec<(ALMeta, Self::M)>;
+    fn transfer(stmt: ALStmt, memory: Self::M) -> Vec<(Option<ALMeta>, Self::M)> {
+        use ALStmt::*;
+        match stmt {
+            ALEmpty { next, .. } => vec![(next, memory)],
+            ALBlock { next, .. } => vec![(next, memory)],
+            ALIfThenElse {
+                cond,
+                next_true,
+                next_false,
+                ..
+            }
+            | ALWhile {
+                cond,
+                next_true,
+                next_false,
+                ..
+            } => {
+                let memory_true = Self::filter(cond.clone(), true, memory.clone());
+                let memory_false = Self::filter(cond.clone(), false, memory.clone());
+                let mut res = vec![];
+                if memory_true != Self::M::bottom() {
+                    res.push((Some(next_true), memory_true));
+                }
+                if next_false.is_some() {
+                    if memory_false != Self::M::bottom() {
+                        res.push((next_false, memory_false));
+                    }
+                }
+                res
+            }
+            ALReturn { .. } => vec![(None, memory)],
+            ALAssign {
+                var, value, next, ..
+            } => {
+                let mut new_memory = memory.clone();
+                let rhs_val = Self::eval(&value, &new_memory);
+                new_memory.add(var, rhs_val);
+                vec![(next, new_memory)]
+            }
+            ALAssert { cond, next, .. } => {
+                let memory_true = Self::filter(cond.clone(), true, memory.clone());
+                vec![(next, memory_true)]
+            }
+        }
+    }
+    fn transfer_meta(&self, meta_opt: Option<ALMeta>, memory: Self::M) -> Vec<(ALMeta, Self::M)> {
+        match meta_opt {
+            Some(meta) => Self::transfer(self.instr_from_meta(meta), memory)
+                .into_iter()
+                .filter_map(|(m_opt, mem)| m_opt.map(|m| (m, mem)))
+                .collect(),
+            None => vec![],
+        }
+    }
+    fn instr_from_meta(&self, meta: ALMeta) -> ALStmt;
+}
+
+struct IntervalSemantics {
+    instr_map: HashMap<ALMeta, ALStmt>,
+}
+
+impl IntervalSemantics {
+    fn new(al_program: &ALStmt) -> Self {
+        let all_ins = al_program.all_instrs();
+        let mut instr_map = HashMap::new();
+        for ins in all_ins {
+            instr_map.insert(ins.meta().clone(), ins.clone());
+        }
+        IntervalSemantics { instr_map }
+    }
+}
+
+impl Semantics for IntervalSemantics {
+    type V = Interval;
+    type M = IntervalMemory;
+
+    fn instr_from_meta(&self, meta: ALMeta) -> ALStmt {
+        self.instr_map.get(&meta).unwrap().clone()
+    }
 }

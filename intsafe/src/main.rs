@@ -61,6 +61,12 @@ fn main() -> io::Result<()> {
                     // println!("Is custom gate: {:?}", is_custom_gate);
                     let al_stmt = ALStmt::from_stmt(body);
                     println!("{:#?}", al_stmt);
+                    // println!();
+                    // println!();
+                    // println!();
+                    // for s in al_stmt.all_instrs() {
+                    //     println!("{:#?}: {:?}", s.meta(), s);
+                    // }
                 }
                 _ => eprintln!("Only accept templates."),
             }

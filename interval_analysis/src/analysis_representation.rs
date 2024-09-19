@@ -4,7 +4,7 @@ use std::hash::{Hash, Hasher};
 use num_bigint::BigInt;
 use program_structure::abstract_syntax_tree::ast::*;
 
-#[derive(Hash, Clone, Copy)]
+#[derive(Hash, Clone, Copy, Eq, PartialEq)]
 pub struct ALMeta {
     pub start: usize,
     pub end: usize,
@@ -30,7 +30,7 @@ impl ALMeta {
 
 impl std::fmt::Debug for ALMeta {
     fn fmt(&self, _f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        Ok(())
+        write!(_f, "({}~{})", self.start, self.end)
     }
 }
 
@@ -140,7 +140,7 @@ impl ALCond {
 
 impl std::fmt::Debug for ALCond {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?} {:?} {:?}", self.lhs, self.pred, self.rhs)
+        write!(f, "{:?} {:?} {:?}", self.pred, self.lhs, self.rhs)
     }
 }
 
@@ -166,7 +166,7 @@ pub enum ALStmt {
     },
     ALWhile {
         meta: ALMeta,
-        cond: ALExpr,
+        cond: ALCond,
         body: Box<ALStmt>,
         next_true: ALMeta,
         next_false: Option<ALMeta>,
@@ -184,7 +184,7 @@ pub enum ALStmt {
     },
     ALAssert {
         meta: ALMeta,
-        arg: ALExpr,
+        cond: ALCond,
         next: Option<ALMeta>,
     },
 }
@@ -196,8 +196,27 @@ impl ALStmt {
         al_stmt.init_next(None);
         al_stmt
     }
-    fn extract_pred(expr: ALExpr) -> () {}
-    fn meta(&self) -> ALMeta {
+    pub fn get_next(&self) -> Vec<Option<ALMeta>> {
+        use ALStmt::*;
+        match self {
+            ALEmpty { next, .. }
+            | ALBlock { next, .. }
+            | ALAssign { next, .. }
+            | ALAssert { next, .. } => vec![*next],
+            ALIfThenElse {
+                next_true,
+                next_false,
+                ..
+            }
+            | ALWhile {
+                next_true,
+                next_false,
+                ..
+            } => vec![*next_false, Some(*next_true)],
+            ALReturn { .. } => vec![None],
+        }
+    }
+    pub fn meta(&self) -> ALMeta {
         use ALStmt::*;
         match self {
             ALEmpty { meta, .. }
@@ -212,7 +231,7 @@ impl ALStmt {
     fn first_stmt(&self) -> &ALStmt {
         use ALStmt::*;
         match self {
-            ALBlock { stmts, .. } => stmts.first().map_or(self, |stmt| stmt.first_stmt()),
+            // ALBlock { stmts, .. } => stmts.first().map_or(self, |stmt| stmt.first_stmt()),
             _ => self,
         }
     }
@@ -342,7 +361,7 @@ impl ALStmt {
                 let al_body = ALStmt::from_stmt_suppl(&*body);
                 ALStmt::ALWhile {
                     meta: ALMeta::from_meta(meta),
-                    cond: ALExpr::from_expr(cond),
+                    cond: ALCond::from_expr(cond),
                     body: Box::new(al_body),
                     next_true: ALMeta::empty(),
                     next_false: None,
@@ -417,9 +436,39 @@ impl ALStmt {
             }
             Assert { meta, arg } => ALStmt::ALAssert {
                 meta: ALMeta::from_meta(meta),
-                arg: ALExpr::from_expr(arg),
+                cond: ALCond::from_expr(arg),
                 next: None,
             },
+        }
+    }
+
+    pub fn all_instrs(&self) -> Vec<Self> {
+        let mut instrs = Vec::new();
+        self.all_instrs_suppl(&mut instrs);
+        instrs
+    }
+
+    fn all_instrs_suppl(&self, instrs: &mut Vec<Self>) {
+        use ALStmt::*;
+        instrs.push(self.clone());
+        match self {
+            ALBlock { stmts, .. } => {
+                for stmt in stmts.iter() {
+                    stmt.all_instrs_suppl(instrs);
+                }
+            }
+            ALIfThenElse {
+                if_case, else_case, ..
+            } => {
+                if_case.all_instrs_suppl(instrs);
+                if let Some(else_case) = else_case {
+                    else_case.all_instrs_suppl(instrs);
+                }
+            }
+            ALWhile { body, .. } => {
+                body.all_instrs_suppl(instrs);
+            }
+            ALEmpty { .. } | ALReturn { .. } | ALAssign { .. } | ALAssert { .. } => (),
         }
     }
 
@@ -430,9 +479,11 @@ impl ALStmt {
         let indent = "\t".repeat(depth); // Create an indentation string based on the current depth
 
         match self {
-            ALEmpty { meta, .. } => write!(f, "{}Empty: {:?}", indent, meta),
-            ALBlock { meta, stmts, .. } => {
-                write!(f, "{}Block: {:?}", indent, meta)?;
+            ALEmpty { meta, next } => write!(f, "{}Empty: {:?} \t--> {:?}", indent, meta, next),
+            ALBlock {
+                meta, stmts, next, ..
+            } => {
+                write!(f, "{}Block: {:?} \t--> {:?}", indent, meta, next)?;
                 for stmt in stmts.iter() {
                     writeln!(f)?; // Newline for each statement
                     stmt.fmt_with_depth(f, depth + 1)?; // Increase the depth for nested statements
@@ -444,9 +495,15 @@ impl ALStmt {
                 cond,
                 if_case,
                 else_case,
+                next_true,
+                next_false,
                 ..
             } => {
-                write!(f, "{}IfThenElse: {:?}", indent, meta)?;
+                write!(
+                    f,
+                    "{}IfThenElse: {:?} \t--> {:?} or {:?}",
+                    indent, meta, next_true, next_false
+                )?;
                 writeln!(f, "\n{}Cond: {:?}", indent, cond)?;
                 writeln!(f, "{}If:", indent)?;
                 if_case.fmt_with_depth(f, depth + 1)?;
@@ -457,9 +514,18 @@ impl ALStmt {
                 Ok(())
             }
             ALWhile {
-                meta, cond, body, ..
+                meta,
+                cond,
+                body,
+                next_true,
+                next_false,
+                ..
             } => {
-                write!(f, "{}While: {:?}", indent, meta)?;
+                write!(
+                    f,
+                    "{}While: {:?} \t--> {:?} or {:?}",
+                    indent, meta, next_true, next_false
+                )?;
                 writeln!(f, "\n{}Cond: {:?}", indent, cond)?;
                 writeln!(f, "{}Body:", indent)?;
                 body.fmt_with_depth(f, depth + 1)
@@ -468,12 +534,26 @@ impl ALStmt {
                 write!(f, "{}Return: {:?} {:?}", indent, meta, value)
             }
             ALAssign {
-                meta, var, value, ..
+                meta,
+                var,
+                value,
+                next,
+                ..
             } => {
-                write!(f, "{}Assign: {:?} {} = {:?}", indent, meta, var, value)
+                write!(
+                    f,
+                    "{}Assign: {:?} {}\t<-- {:?} \t--> {:?}",
+                    indent, meta, var, value, next
+                )
             }
-            ALAssert { meta, arg, .. } => {
-                write!(f, "{}Assert: {:?} {:?}", indent, meta, arg)
+            ALAssert {
+                meta, cond, next, ..
+            } => {
+                write!(
+                    f,
+                    "{}Assert: {:?} {:?} \t--> {:?}",
+                    indent, meta, cond, next
+                )
             }
         }
     }
