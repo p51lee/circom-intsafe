@@ -6,4 +6,3 @@ program_structure/target/
 .idea/
 .vscode/
 .DS_Store
-*.circom
