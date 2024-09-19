@@ -54,6 +54,7 @@ circom-intsafe examples/mux1.circom -p 10007
 ```
 
 ```circom
+// examples/mux1.circom
 pragma circom 2.0.0;
 
 template MultiMux1(n) {
