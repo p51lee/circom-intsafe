@@ -13,9 +13,10 @@ fn main() -> io::Result<()> {
     // Collect the command-line arguments into a vector.
     let args: Vec<String> = env::args().collect();
 
-    // Variables to store the -p value and file path
-    let mut p_value: Option<i64> = None; // Use i64 for larger numbers
+    // Variables to store the -p value, file path, and IR print flag
+    let mut p_value: Option<i64> = None; // Use i64 for the -p value
     let mut file_path: Option<String> = None;
+    let mut print_ir = false; // Flag for printing IR
 
     // Iterate over the arguments and parse them.
     let mut i = 1; // Start after the program name
@@ -29,7 +30,6 @@ fn main() -> io::Result<()> {
 
             // Try to parse the value following -p
             match args[i + 1].parse::<i64>() {
-                // Parse as i64
                 Ok(num) => p_value = Some(num),
                 Err(_) => {
                     eprintln!("Error: '{}' is not a valid number.", args[i + 1]);
@@ -39,10 +39,18 @@ fn main() -> io::Result<()> {
 
             // Skip the value we just processed
             i += 2;
-        } else {
-            // If it's not a -p option, it's the file path
+        } else if args[i] == "--print-ir" {
+            // Set the print_ir flag to true
+            print_ir = true;
+            i += 1;
+        } else if file_path.is_none() {
+            // If it's not a -p option or --print-ir, treat it as the file path
             file_path = Some(args[i].clone());
             i += 1;
+        } else {
+            // Extra arguments are not allowed
+            eprintln!("Error: Unexpected argument '{}'", args[i]);
+            std::process::exit(1);
         }
     }
 
@@ -98,27 +106,14 @@ fn main() -> io::Result<()> {
                     is_custom_gate,
                     ..
                 } => {
-                    println!("Template: {}", name);
-                    println!("Args: {:?}", args);
-                    // println!("Arg location: {:?}", arg_location);
-                    // println!("Body: {:#?}", body);
-                    // println!("Parallel: {:?}", parallel);
-                    // println!("Is custom gate: {:?}", is_custom_gate);
                     let al_stmt = ALStmt::from_stmt(body);
-                    println!("{:#?}", al_stmt);
-                    println!();
+                    if print_ir {
+                        println!("{:#?}", al_stmt);
+                        println!();
+                    }
                     let mut analyzer =
                         IntervalAnalyzer::new(al_stmt, args.clone(), BigInt::from(prime));
-                    analyzer.widen();
-                    analyzer.narrow();
-                    analyzer.check_all();
-                    // println!("{:#?}", analyzer.table);
-                    // for m in al_stmt.all_metas() {
-                    //     println!("{:#?}", m);
-                    // }
-                    // for s in al_stmt.all_instrs() {
-                    //     println!("{:#?}: {:?}", s.meta(), s);
-                    // }
+                    analyzer.analyze();
                 }
                 _ => eprintln!("Only accept templates."),
             }
