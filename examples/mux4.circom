@@ -23,7 +23,7 @@ template MultiMux4(n) {
 
     assert (n < 256);
     assert (0 <= c);
-    assert (c < 8192);
+    assert (c < 81920000);
     assert (0 <= s);
     assert (s <= 1);
 

@@ -14,7 +14,7 @@ fn main() -> io::Result<()> {
     let args: Vec<String> = env::args().collect();
 
     // Variables to store the -p value, file path, and IR print flag
-    let mut p_value: Option<i64> = None; // Use i64 for the -p value
+    let mut p_value: Option<BigInt> = None; // Use i64 for the -p value
     let mut file_path: Option<String> = None;
     let mut print_ir = false; // Flag for printing IR
 
@@ -29,7 +29,7 @@ fn main() -> io::Result<()> {
             }
 
             // Try to parse the value following -p
-            match args[i + 1].parse::<i64>() {
+            match args[i + 1].parse::<BigInt>() {
                 Ok(num) => p_value = Some(num),
                 Err(_) => {
                     eprintln!("Error: '{}' is not a valid number.", args[i + 1]);
@@ -103,8 +103,7 @@ fn main() -> io::Result<()> {
                         println!("{:#?}", al_stmt);
                         println!();
                     }
-                    let mut analyzer =
-                        IntervalAnalyzer::new(al_stmt, args.clone(), BigInt::from(prime));
+                    let mut analyzer = IntervalAnalyzer::new(al_stmt, args.clone(), prime);
                     analyzer.analyze();
                 }
                 _ => eprintln!("Only accept templates."),
